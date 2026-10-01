@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::api::auth::{AuthError, AuthenticatedRequest};
 use crate::api::ApiState;
 use crate::domain::{EmailId, EmailStatus, StoredEmail};
+use crate::persistence::api_key_repo::Role;
 use crate::persistence::email_repo;
 
 #[derive(Serialize)]
@@ -58,7 +60,10 @@ struct ActionResponse {
     message: String,
 }
 
-async fn list_emails(State(_state): State<Arc<ApiState>>) -> Json<EmailListResponse> {
+async fn list_emails(
+    State(_state): State<Arc<ApiState>>,
+    _auth: AuthenticatedRequest,
+) -> Json<EmailListResponse> {
     // Simplified listing — in production, add pagination and filtering
     let items = Vec::new(); // Placeholder for real query
     Json(EmailListResponse { items, total: 0 })
@@ -67,6 +72,7 @@ async fn list_emails(State(_state): State<Arc<ApiState>>) -> Json<EmailListRespo
 async fn get_email(
     State(_state): State<Arc<ApiState>>,
     Path(id): Path<Uuid>,
+    _auth: AuthenticatedRequest,
 ) -> Json<serde_json::Value> {
     // Placeholder
     Json(serde_json::json!({"id": id, "status": "pending"}))
@@ -75,6 +81,7 @@ async fn get_email(
 async fn get_thread(
     State(_state): State<Arc<ApiState>>,
     Path(_id): Path<Uuid>,
+    _auth: AuthenticatedRequest,
 ) -> Json<ThreadResponse> {
     Json(ThreadResponse { messages: vec![] })
 }
@@ -82,41 +89,49 @@ async fn get_thread(
 async fn reprocess_email(
     State(_state): State<Arc<ApiState>>,
     Path(id): Path<Uuid>,
-) -> Json<ActionResponse> {
-    Json(ActionResponse {
+    auth: AuthenticatedRequest,
+) -> Result<Json<ActionResponse>, AuthError> {
+    auth.require(Role::Operator)?;
+    Ok(Json(ActionResponse {
         success: true,
         message: format!("reprocessing scheduled for {id}"),
-    })
+    }))
 }
 
 async fn review_email(
     State(_state): State<Arc<ApiState>>,
     Path(id): Path<Uuid>,
-) -> Json<ActionResponse> {
-    Json(ActionResponse {
+    auth: AuthenticatedRequest,
+) -> Result<Json<ActionResponse>, AuthError> {
+    auth.require(Role::Operator)?;
+    Ok(Json(ActionResponse {
         success: true,
         message: format!("email {id} flagged for review"),
-    })
+    }))
 }
 
 async fn approve_email(
     State(_state): State<Arc<ApiState>>,
     Path(id): Path<Uuid>,
-) -> Json<ActionResponse> {
-    Json(ActionResponse {
+    auth: AuthenticatedRequest,
+) -> Result<Json<ActionResponse>, AuthError> {
+    auth.require(Role::Manager)?;
+    Ok(Json(ActionResponse {
         success: true,
         message: format!("email {id} approved"),
-    })
+    }))
 }
 
 async fn reject_email(
     State(_state): State<Arc<ApiState>>,
     Path(id): Path<Uuid>,
-) -> Json<ActionResponse> {
-    Json(ActionResponse {
+    auth: AuthenticatedRequest,
+) -> Result<Json<ActionResponse>, AuthError> {
+    auth.require(Role::Manager)?;
+    Ok(Json(ActionResponse {
         success: true,
         message: format!("email {id} rejected"),
-    })
+    }))
 }
 
 pub fn routes() -> Router<Arc<ApiState>> {

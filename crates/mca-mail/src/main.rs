@@ -15,6 +15,13 @@ async fn main() -> anyhow::Result<()> {
         .json()
         .init();
 
+    // Any argument routes to the admin CLI (`mca-mail help`); no arguments
+    // start the server.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        return mca_mail::cli::run(&args).await;
+    }
+
     // Bootstrap all dependencies
     let app = match mca_mail::application::App::bootstrap().await {
         Ok(a) => a,

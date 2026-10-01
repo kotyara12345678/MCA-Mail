@@ -48,6 +48,7 @@ jobs:
       - run: cargo test --workspace --lib
       - run: cargo test --test persistence_contract
       - run: cargo test --test e2e_contract
+      - run: cargo test --test api_contract
 
   binary:
     name: Build release binaries

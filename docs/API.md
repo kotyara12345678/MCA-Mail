@@ -44,3 +44,13 @@ Base URL: `http://localhost:8080`
 ## Authentication
 
 All endpoints except `/health` and `/ready` require `X-API-Key` header.
+
+Create and manage keys with the CLI (raw key is shown once):
+
+```bash
+mca-mail api-key create --name ops --role manager
+mca-mail api-key list
+mca-mail api-key revoke <id|prefix>
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md#api-keys) for Docker usage and role meanings.

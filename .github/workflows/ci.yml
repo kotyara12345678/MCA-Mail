@@ -86,6 +86,9 @@ jobs:
       - name: Pipeline e2e tests
         run: cargo test --test e2e_contract
 
+      - name: API auth contract tests
+        run: cargo test --test api_contract
+
   docker:
     name: Docker image build
     runs-on: ubuntu-latest

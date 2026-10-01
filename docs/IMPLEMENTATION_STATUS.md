@@ -37,15 +37,21 @@ _Last updated: 2026-10-01_
 - Handoff with automation lock
 - Draft planning; `dry_run` default
 
-### Phase 6 — API & Security (partial)
+### Phase 6 — API & Security ✅
 - ✅ Axum router: health, ready, emails, leads (stubs), agents (stub)
 - ✅ Prompt injection: email content treated as data
 - ✅ Outbound policy guard rails (mode, rate, body limits)
-- ⚠️ Real API-key verification in `api_keys` table — pending
+- ✅ Real API-key verification: `X-API-Key` extractor checks `api_keys`
+  (hashed lookup, expiry, `last_used_at`), role gates per handler
+  (viewer reads, operator reprocess/review, manager approve/reject)
+- ✅ Admin CLI: `mca-mail api-key create|list|revoke`, `mca-mail healthcheck`
+  (the Docker HEALTHCHECK), `mca-mail help` — raw key printed once
 
-### Phase 7 — Testing ✅ (unit) / ⚠️ (integration/e2e)
-- 78 unit tests passing; clippy clean; fmt clean
-- `persistence_contract` integration tests (need `MCA_TEST_DATABASE_URL`)
+### Phase 7 — Testing ✅ (unit) / ✅ (integration/e2e)
+- 107 tests passing (83 unit + 15 persistence + 6 API auth + 3 e2e);
+  clippy clean; fmt clean
+- `persistence_contract`, `api_contract`, `e2e_contract` all embed and apply
+  the migrations (need `MCA_TEST_DATABASE_URL`)
 - Manual E2E against mock corpus + real LLM: 10 fixtures processed,
   categories/spam-verdicts/leads correctly persisted
 
@@ -75,13 +81,15 @@ Fresh `mca_mail_dev`, mock mail provider (10 fixtures) + real Polza AI LLM:
 
 - `.github/workflows/ci.yml`: fmt → clippy (-D warnings) → unit tests →
   release build; integration job with a PostgreSQL service runs
-  `persistence_contract` + `e2e_contract` (both embed and apply the
-  migrations — no sqlx-cli install); separate Docker image build with GHA
-  layer cache; 100-line limit report (non-blocking)
+  `persistence_contract` + `e2e_contract` + `api_contract` (all embed and
+  apply the migrations — no sqlx-cli install); separate Docker image build
+  with GHA layer cache; 100-line limit report (non-blocking)
 - `.github/workflows/release.yml`: tests gate → linux/windows binaries +
   GHCR image (GHA cache) → GitHub Release with assets on `v*` tags
 - `SQLX_OFFLINE=true` in CI so any future `sqlx::query!` fails fast instead
   of reaching for a live database
+- Repo published at github.com/kotyara12345678/MCA-Mail — full CI green
+  (check, integration, docker, line-limit)
 
 ## Verified End-to-End (2026-09-30)
 
@@ -99,12 +107,9 @@ With mock mail provider + real Polza AI LLM:
 ## Remaining
 
 1. API: real email/lead listing queries, draft approve/reject wiring
-2. API auth: verify keys against `api_keys`, role-based access
-3. Real IMAP/SMTP pilot after sysadmin provides credentials
-4. Company research provider (approved registry integration)
-5. Graceful-shutdown test, retention job e2e check
-6. Push the repository to GitHub — the workflows are ready but cannot run
-   until the repo is under version control (`git init` + remote)
+2. Real IMAP/SMTP pilot after sysadmin provides credentials
+3. Company research provider (approved registry integration)
+4. Graceful-shutdown test, retention job e2e check
 
 ## Decisions Log
 

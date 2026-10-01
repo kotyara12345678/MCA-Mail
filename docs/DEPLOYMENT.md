@@ -49,6 +49,27 @@ Plus for AI:
 | `LLM_API_KEY` | API key (secret) |
 | `LLM_MODEL` | Default model id |
 
+## API Keys
+
+REST endpoints (except `/health`, `/ready`) need an `X-API-Key` header. Keys
+are managed with the built-in CLI — the raw value is printed once at creation
+and only its SHA-256 is stored.
+
+```bash
+# bare binary
+mca-mail api-key create --name ops-admin --role admin --expires-days 365
+mca-mail api-key list
+mca-mail api-key revoke <id|prefix>
+
+# in Docker
+docker compose run --rm app api-key create --name ops-admin --role admin
+docker compose run --rm app api-key list
+```
+
+Roles: `viewer` (read) → `operator` → `manager` → `admin`. Revoke by the
+8-char `PREFIX` column from `api-key list`. The same CLI powers the Docker
+`HEALTHCHECK` (`mca-mail healthcheck` → GET `/health` on loopback).
+
 ## Pre-launch Checklist
 
 1. IMAP/SMTP credentials verified with a test mailbox.
@@ -58,6 +79,8 @@ Plus for AI:
 5. Approve auto-send policy and set `EMAIL_AUTO_SEND=false` initially.
 6. Confirm retention policy (defaults: 365d emails, 180d events, 1095d audit).
 7. Verify `LLM_API_KEY` budget and model prices.
+8. First API key created (`api-key create`) and stored in the operator's
+   secret manager.
 
 ## Backup & Restore
 

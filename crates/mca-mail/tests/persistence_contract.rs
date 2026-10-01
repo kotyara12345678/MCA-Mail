@@ -465,6 +465,45 @@ async fn api_keys_are_hashed_and_verifiable() {
         .is_none());
 }
 
+/// Operator flow: list keys, resolve one by hash prefix, revoke it.
+#[tokio::test]
+async fn api_key_list_and_prefix_revoke() {
+    let Some(pool) = pool().await else { return };
+    let (raw, id) = persistence::api_key_repo::create(
+        &pool,
+        "prefix probe",
+        persistence::api_key_repo::Role::Viewer,
+        "tester",
+        None,
+    )
+    .await
+    .expect("create key");
+    let prefix = persistence::api_key_repo::key_prefix(&raw);
+
+    let listed = persistence::api_key_repo::list(&pool).await.expect("list");
+    let row = listed.iter().find(|r| r.id == id).expect("key listed");
+    assert_eq!(row.name, "prefix probe");
+    assert!(row.is_active);
+
+    let resolved = persistence::api_key_repo::id_by_prefix(&pool, &prefix)
+        .await
+        .expect("prefix lookup");
+    assert_eq!(resolved, Some(id), "prefix must resolve to the key");
+
+    persistence::api_key_repo::revoke(&pool, id)
+        .await
+        .expect("revoke");
+
+    let resolved = persistence::api_key_repo::id_by_prefix(&pool, &prefix)
+        .await
+        .expect("prefix lookup after revoke");
+    assert!(resolved.is_none(), "revoked key must not resolve");
+
+    let listed = persistence::api_key_repo::list(&pool).await.expect("list");
+    let row = listed.iter().find(|r| r.id == id).expect("key listed");
+    assert!(!row.is_active, "revoked key stays visible for audit");
+}
+
 /// Settings round-trip and the automation switch defaults to enabled.
 #[tokio::test]
 async fn settings_round_trip() {
