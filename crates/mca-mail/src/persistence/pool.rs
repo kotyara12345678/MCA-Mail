@@ -30,7 +30,16 @@ pub async fn connect(settings: &DatabaseSettings) -> Result<PgPool, AppError> {
         .idle_timeout(Duration::from_secs(600))
         .max_lifetime(Duration::from_secs(1800))
         .connect_with(options)
-        .await?;
+        .await
+        .map_err(|e| {
+            // Bypass `From<sqlx::Error>` to emit the specific event instead of
+            // the generic `repository_error`.
+            crate::observability::system::database_connection_failed(
+                crate::observability::errors::sqlx_error_type(&e),
+                &e.to_string(),
+            );
+            AppError::Database(e)
+        })?;
 
     Ok(pool)
 }

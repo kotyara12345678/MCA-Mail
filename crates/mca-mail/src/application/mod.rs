@@ -1,6 +1,9 @@
 //! Application bootstrap: wiring together all dependencies.
 
+mod handlers;
 pub mod workers;
+
+use handlers::{make_crm_handler, make_mail_tool_handler, make_support_tool_handler};
 
 use std::sync::Arc;
 
@@ -36,10 +39,13 @@ impl App {
 
         // 3. Run migrations
         if config.database.auto_migrate {
+            let started = std::time::Instant::now();
+            crate::observability::system::migration_started();
             sqlx::migrate!("../../migrations")
                 .run(&pool)
                 .await
                 .map_err(AppError::Migration)?;
+            crate::observability::system::migration_completed(started.elapsed().as_millis() as u64);
             info!("database migrations applied");
         }
 
@@ -50,21 +56,18 @@ impl App {
         // 5. Build tool registry
         let mut tools = ToolRegistry::new();
 
-        // Register CRM tools
         for def in crm::all_tools() {
             let name = def.name.clone();
             let handler = make_crm_handler(&name);
             tools.register(def, handler);
         }
 
-        // Register mail tools
         for def in mail_tools::all_tools() {
             let name = def.name.clone();
             let handler = make_mail_tool_handler(&name);
             tools.register(def, handler);
         }
 
-        // Register support tools
         for def in support::all_tools() {
             let name = def.name.clone();
             let handler = make_support_tool_handler(&name);
@@ -94,62 +97,4 @@ impl App {
             state,
         })
     }
-}
-
-/// Stub handlers for tool registration — real implementations will use persistence.
-fn make_crm_handler(
-    name: &str,
-) -> std::sync::Arc<
-    dyn Fn(serde_json::Value) -> Result<crate::tools::ToolResult, crate::error::ToolError>
-        + Send
-        + Sync,
-> {
-    let n = name.to_string();
-    std::sync::Arc::new(move |args| {
-        Ok(crate::tools::ToolResult {
-            success: true,
-            summary: format!(
-                "{n} called with {} args",
-                args.as_object().map(|o| o.len()).unwrap_or(0)
-            ),
-            data: serde_json::json!({"called": n, "args": args}),
-            error: None,
-        })
-    })
-}
-
-fn make_mail_tool_handler(
-    name: &str,
-) -> std::sync::Arc<
-    dyn Fn(serde_json::Value) -> Result<crate::tools::ToolResult, crate::error::ToolError>
-        + Send
-        + Sync,
-> {
-    let n = name.to_string();
-    std::sync::Arc::new(move |_args| {
-        Ok(crate::tools::ToolResult {
-            success: true,
-            summary: format!("{n} called"),
-            data: serde_json::json!({"called": n}),
-            error: None,
-        })
-    })
-}
-
-fn make_support_tool_handler(
-    name: &str,
-) -> std::sync::Arc<
-    dyn Fn(serde_json::Value) -> Result<crate::tools::ToolResult, crate::error::ToolError>
-        + Send
-        + Sync,
-> {
-    let n = name.to_string();
-    std::sync::Arc::new(move |args| {
-        Ok(crate::tools::ToolResult {
-            success: true,
-            summary: format!("{n} called"),
-            data: serde_json::json!({"called": n, "args": args}),
-            error: None,
-        })
-    })
 }

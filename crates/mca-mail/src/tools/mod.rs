@@ -109,7 +109,57 @@ impl ToolRegistry {
             });
         }
 
-        (entry.handler)(args)
+        // Mailbox action arguments, captured before the handler consumes them.
+        let email_id = args
+            .get("email_id")
+            .and_then(Value::as_str)
+            .and_then(|s| uuid::Uuid::parse_str(s).ok());
+        let folder = args
+            .get("folder")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let label = args
+            .get("label")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let started = std::time::Instant::now();
+        crate::observability::tools::tool_started(agent.as_str(), tool_name);
+        let result = (entry.handler)(args);
+        let duration_ms = started.elapsed().as_millis() as u64;
+
+        match &result {
+            Ok(r) => {
+                crate::observability::tools::tool_completed(
+                    agent.as_str(),
+                    tool_name,
+                    &r.summary,
+                    duration_ms,
+                );
+                match tool_name {
+                    "move_email" => crate::observability::actions::email_moved(
+                        email_id,
+                        folder.as_deref().unwrap_or("unknown"),
+                    ),
+                    "archive_email" => {
+                        crate::observability::actions::email_moved(email_id, "archive")
+                    }
+                    "label_email" => crate::observability::actions::email_labeled(
+                        email_id,
+                        label.as_deref().unwrap_or("unknown"),
+                    ),
+                    _ => {}
+                }
+            }
+            Err(e) => crate::observability::tools::tool_failed(
+                agent.as_str(),
+                tool_name,
+                crate::observability::errors::tool_error_type(e),
+                &e.to_string(),
+                duration_ms,
+            ),
+        }
+        result
     }
 
     pub fn get(&self, name: &str) -> Option<&ToolDef> {
@@ -133,11 +183,16 @@ pub async fn execute_with_timeout(
     let registry = registry.clone();
     let name = tool_name.to_string();
     let name_for_error = name.clone();
+    let ms = timeout.as_millis() as u64;
 
-    tokio::time::timeout(timeout, async move { registry.execute(agent, &name, args) })
-        .await
-        .map_err(|_| ToolError::Timeout {
-            tool: name_for_error,
-            ms: timeout.as_millis() as u64,
-        })?
+    match tokio::time::timeout(timeout, async move { registry.execute(agent, &name, args) }).await {
+        Ok(result) => result,
+        Err(_) => {
+            crate::observability::tools::tool_timeout(agent.as_str(), tool_name, ms);
+            Err(ToolError::Timeout {
+                tool: name_for_error,
+                ms,
+            })
+        }
+    }
 }

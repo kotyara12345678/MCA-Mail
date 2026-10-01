@@ -2,20 +2,15 @@
 
 pub mod auth;
 pub mod errors;
+mod http_log;
 pub mod routes;
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use axum::http::HeaderName;
 use axum::Router;
 use tower_http::cors::CorsLayer;
-use tower_http::request_id::MakeRequestUuid;
-use tower_http::request_id::SetRequestIdLayer;
-use tower_http::timeout::TimeoutLayer;
-use tower_http::trace::TraceLayer;
 
-use crate::api::routes::{email_routes, health};
+use crate::api::routes::{email_routes, events, health};
 use crate::config::ApiSettings;
 use crate::orchestration::Orchestrator;
 use crate::persistence::pool::Health;
@@ -42,17 +37,17 @@ impl ApiState {
 pub type SharedState = Arc<ApiState>;
 
 /// Build the Axum router with all routes.
+///
+/// `http_log` is the outermost layer (request id, 30s timeout, http events);
+/// it runs after routing so the matched path pattern is available. The SSE
+/// routes are merged afterwards on purpose — a stream must never be cut by
+/// the request timeout.
 pub fn build_router(_settings: &ApiSettings, state: SharedState) -> Router {
-    let request_id_header = HeaderName::from_static("x-request-id");
     Router::new()
         .merge(health::routes())
         .merge(email_routes::routes())
-        .layer(TraceLayer::new_for_http())
-        .layer(SetRequestIdLayer::new(request_id_header, MakeRequestUuid))
-        .layer(TimeoutLayer::with_status_code(
-            axum::http::StatusCode::REQUEST_TIMEOUT,
-            Duration::from_secs(30),
-        ))
         .layer(CorsLayer::permissive())
+        .layer(axum::middleware::from_fn(http_log::log_request))
+        .merge(events::routes())
         .with_state(state)
 }

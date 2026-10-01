@@ -6,14 +6,8 @@ use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing/logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
-        .json()
-        .init();
+    // Structured logging: LOG_LEVEL / LOG_FORMAT=pretty|json (see observability).
+    mca_mail::observability::init();
 
     // Any argument routes to the admin CLI (`mca-mail help`); no arguments
     // start the server.

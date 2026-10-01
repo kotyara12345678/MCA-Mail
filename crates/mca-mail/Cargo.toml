@@ -57,3 +57,6 @@ prometheus.workspace = true
 url.workspace = true
 mime_guess.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true

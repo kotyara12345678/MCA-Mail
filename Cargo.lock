@@ -1398,6 +1398,7 @@ dependencies = [
  "futures",
  "hex",
  "html2text",
+ "http-body-util",
  "hyper",
  "lettre",
  "mail-parser",

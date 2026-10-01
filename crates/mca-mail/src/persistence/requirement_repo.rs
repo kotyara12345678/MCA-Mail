@@ -83,11 +83,23 @@ pub async fn upsert_many(
         .bind(&r.unit)
         .bind(r.confidence)
         .execute(&mut *tx)
-        .await?;
+        .await
+        .map_err(|e| tx_failure("upsert_many", e))?;
         changed += rows.rows_affected();
     }
-    tx.commit().await?;
+    tx.commit()
+        .await
+        .map_err(|e| tx_failure("upsert_many", e))?;
     Ok(changed)
+}
+
+/// Emit `transaction_failed` and wrap the sqlx error without double-logging
+/// through the central `From<sqlx::Error>` hook.
+fn tx_failure(operation: &str, e: sqlx::Error) -> AppError {
+    let error_type = crate::observability::errors::sqlx_error_type(&e);
+    let text = e.to_string();
+    crate::observability::system::transaction_failed(operation, error_type, &text);
+    AppError::Database(e)
 }
 
 /// Mark fields outside the requested service scope as not applicable, so the

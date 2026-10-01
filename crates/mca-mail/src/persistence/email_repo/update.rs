@@ -92,13 +92,17 @@ pub async fn attach_lead(pool: &PgPool, id: EmailId, lead_id: Uuid) -> Result<()
     Ok(())
 }
 
-pub async fn record_error(pool: &PgPool, id: EmailId, error: &str) -> Result<(), AppError> {
-    sqlx::query("UPDATE emails SET attempts = attempts + 1, last_error = $2 WHERE id = $1")
-        .bind(id)
-        .bind(truncate(error, 2000))
-        .execute(pool)
-        .await?;
-    Ok(())
+/// Record a failed attempt and return the new attempt counter (retry telemetry).
+pub async fn record_error(pool: &PgPool, id: EmailId, error: &str) -> Result<i32, AppError> {
+    let attempts = sqlx::query_scalar(
+        "UPDATE emails SET attempts = attempts + 1, last_error = $2 \
+         WHERE id = $1 RETURNING attempts",
+    )
+    .bind(id)
+    .bind(truncate(error, 2000))
+    .fetch_one(pool)
+    .await?;
+    Ok(attempts)
 }
 
 /// Release claimed messages back to the queue after a transient failure.

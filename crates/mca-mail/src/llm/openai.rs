@@ -97,6 +97,17 @@ struct Usage {
     completion_tokens: i64,
 }
 
+/// Emit `llm_failed` for a final transport failure (never logs prompts).
+fn report_llm_failed(provider: &OpenAiProvider, model: &str, err: &LlmError, retry_count: u32) {
+    crate::observability::llm::llm_failed(
+        provider.provider_name(),
+        model,
+        crate::observability::errors::llm_error_type(err),
+        retry_count,
+        &err.to_string(),
+    );
+}
+
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn chat(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
@@ -152,11 +163,21 @@ impl LlmProvider for OpenAiProvider {
             });
         }
 
-        let mut last_error = None;
+        let mut last_error: Option<LlmError> = None;
         let max_attempts = (self.max_retries + 1) as usize;
 
         for attempt in 0..max_attempts {
             if attempt > 0 {
+                let cause = last_error
+                    .as_ref()
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "retryable failure".into());
+                crate::observability::llm::llm_retry(
+                    self.provider_name(),
+                    &chat_req.model,
+                    attempt as u32,
+                    &cause,
+                );
                 let backoff = self.retry_backoff_ms * 2u64.pow(attempt as u32 - 1);
                 tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
             }
@@ -194,10 +215,12 @@ impl LlmProvider for OpenAiProvider {
                                 });
                             }
                             Err(e) => {
-                                last_error = Some(LlmError::Malformed(format!("JSON parse: {e}")));
+                                let err = LlmError::Malformed(format!("JSON parse: {e}"));
                                 if attempt == max_attempts - 1 {
-                                    return Err(last_error.take().unwrap());
+                                    report_llm_failed(self, &chat_req.model, &err, attempt as u32);
+                                    return Err(err);
                                 }
+                                last_error = Some(err);
                                 continue;
                             }
                         }
@@ -210,29 +233,40 @@ impl LlmProvider for OpenAiProvider {
                         continue;
                     } else {
                         let body = resp.text().await.unwrap_or_default();
-                        return Err(LlmError::Http {
+                        let err = LlmError::Http {
                             status: status.as_u16(),
                             detail: body,
-                        });
+                        };
+                        report_llm_failed(self, &chat_req.model, &err, attempt as u32);
+                        return Err(err);
                     }
                 }
                 Err(e) => {
-                    if e.is_timeout() {
-                        last_error = Some(LlmError::Timeout(self.timeout_seconds * 1000));
+                    let err = if e.is_timeout() {
+                        LlmError::Timeout(self.timeout_seconds * 1000)
                     } else if e.is_connect() {
-                        last_error = Some(LlmError::Unavailable(e.to_string()));
+                        LlmError::Unavailable(e.to_string())
                     } else {
-                        last_error = Some(LlmError::Internal(e.to_string()));
-                    }
+                        LlmError::Internal(e.to_string())
+                    };
                     if attempt == max_attempts - 1 {
-                        return Err(last_error.take().unwrap());
+                        report_llm_failed(self, &chat_req.model, &err, attempt as u32);
+                        return Err(err);
                     }
+                    last_error = Some(err);
                     continue;
                 }
             }
         }
 
-        Err(last_error.unwrap_or(LlmError::Internal("max retries exceeded".into())))
+        let err = last_error.unwrap_or(LlmError::Internal("max retries exceeded".into()));
+        report_llm_failed(
+            self,
+            &chat_req.model,
+            &err,
+            max_attempts.saturating_sub(1) as u32,
+        );
+        Err(err)
     }
 
     fn resolve_model(&self, tier: ModelTier) -> String {

@@ -21,6 +21,7 @@ pub mod domain;
 pub mod error;
 pub mod llm;
 pub mod mail;
+pub mod observability;
 pub mod orchestration;
 pub mod persistence;
 pub mod tools;
