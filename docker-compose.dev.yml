@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mca
+      POSTGRES_PASSWORD: mca
+      POSTGRES_DB: mca_mail
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  mca-mail:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    depends_on:
+      - postgres
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://mca:mca@postgres:5432/mca_mail
+      MAIL_PROVIDER: mock
+      LLM_PROVIDER: mock
+      EMAIL_MODE: dry_run
+      RUST_LOG: debug
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./prompts:/app/prompts
+      - ./fixtures:/app/fixtures
+      - ./migrations:/app/migrations
+    restart: unless-stopped
+
+volumes:
+  pgdata:

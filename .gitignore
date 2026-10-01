@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+.env
+.env.*
+!.env.example
+/config/local.toml
+/config/production.toml
+*.pem
+*.key
+.pgpass
+.DS_Store
+Thumbs.db
+docs/_build

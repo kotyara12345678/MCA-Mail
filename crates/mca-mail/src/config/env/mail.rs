@@ -1,0 +1,27 @@
+//! IMAP and SMTP transport variables.
+
+pub const MAIL: &[(&str, &str)] = &[
+    ("MAIL_PROVIDER", "mail.provider"),
+    ("MAIL_USERNAME", "mail.username"),
+    ("MAIL_PASSWORD", "mail.password"),
+    ("MAIL_POLL_INTERVAL_SECONDS", "mail.poll_interval_seconds"),
+    ("MAIL_FETCH_BATCH_SIZE", "mail.fetch_batch_size"),
+    ("MAIL_MAX_ATTEMPTS", "mail.max_attempts"),
+    ("MAIL_RETRY_BACKOFF_SECONDS", "mail.retry_backoff_seconds"),
+    ("MAIL_RECONNECT_AFTER_ERRORS", "mail.reconnect_after_errors"),
+    ("MAIL_MOCK_CORPUS_DIR", "mail.mock_corpus_dir"),
+    ("MAIL_IMAP_HOST", "mail.imap.host"),
+    ("MAIL_IMAP_PORT", "mail.imap.port"),
+    ("MAIL_IMAP_TLS", "mail.imap.tls"),
+    ("MAIL_INBOX", "mail.imap.inbox"),
+    ("MAIL_QUARANTINE_FOLDER", "mail.imap.quarantine_folder"),
+    ("MAIL_DRAFTS_FOLDER", "mail.imap.drafts_folder"),
+    ("MAIL_ALLOW_INVALID_CERTS", "mail.imap.allow_invalid_certs"),
+    ("MAIL_IDLE", "mail.imap.use_idle"),
+    ("MAIL_NAMESPACE_PREFIX", "mail.imap.namespace_prefix"),
+    ("MAIL_SMTP_HOST", "mail.smtp.host"),
+    ("MAIL_SMTP_PORT", "mail.smtp.port"),
+    ("MAIL_SMTP_TLS", "mail.smtp.tls"),
+    ("MAIL_FROM_ADDRESS", "mail.smtp.from_address"),
+    ("MAIL_FROM_NAME", "mail.smtp.from_name"),
+];

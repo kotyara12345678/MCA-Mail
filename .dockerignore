@@ -1,0 +1,16 @@
+target
+.git
+.github
+.gitignore
+docs
+*.md
+!README.md
+.env
+.env.*
+!.env.example
+config
+scripts
+tests
+crates/*/tests
+Dockerfile
+docker-compose*.yml

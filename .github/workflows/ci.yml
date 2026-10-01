@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # No compile-time query macros are used today; offline mode makes any future
+  # `sqlx::query!` fail fast instead of silently reaching for a live database.
+  SQLX_OFFLINE: true
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint & unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          key: check
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --workspace --lib
+
+      - name: Build release binary
+        run: cargo build --release --package mca-mail
+
+  integration:
+    name: Integration & e2e tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mca
+          POSTGRES_PASSWORD: mca
+          POSTGRES_DB: mca_mail
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mca"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MCA_TEST_DATABASE_URL: postgres://mca:mca@localhost:5432/mca_mail
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          key: integration
+
+      # Both suites embed the migrations and apply them on connect, so the
+      # service container needs no setup beyond being reachable.
+      - name: Persistence contract tests
+        run: cargo test --test persistence_contract
+
+      - name: Pipeline e2e tests
+        run: cargo test --test e2e_contract
+
+  docker:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: mca-mail:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  line-limit:
+    name: 100-line file limit (report)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check file line counts
+        run: python scripts/check_line_limit.py
