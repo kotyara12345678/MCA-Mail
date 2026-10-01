@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
 FROM rust:1.96-slim-bookworm AS chef
+RUN apt-get update -qq && apt-get install -y -qq pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
