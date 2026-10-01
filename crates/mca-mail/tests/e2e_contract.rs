@@ -149,7 +149,7 @@ async fn commercial_email_creates_lead() {
         for (i, call) in spy.call_log().iter().enumerate() {
             eprintln!(
                 "=== call {i} ===\n{}",
-                &call.chars().take(600).collect::<String>()
+                call.chars().take(600).collect::<String>()
             );
         }
         panic!("process: {e:?}");

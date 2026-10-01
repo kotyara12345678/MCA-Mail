@@ -108,7 +108,6 @@ jobs:
   line-limit:
     name: 100-line file limit (report)
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -117,3 +116,5 @@ jobs:
           python-version: "3.12"
       - name: Check file line counts
         run: python scripts/check_line_limit.py
+        # Report only: the limit is not yet met project-wide.
+        continue-on-error: true
