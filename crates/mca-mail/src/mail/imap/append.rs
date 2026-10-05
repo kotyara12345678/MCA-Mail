@@ -24,7 +24,7 @@ impl ImapMailProvider {
                 // `\Draft` is what makes the message visible in the client's
                 // draft list rather than the inbox.
                 session
-                    .append(&folder, Some("\\Draft"), None, raw)
+                    .append(&folder, Some("(\\Draft)"), None, raw)
                     .await
                     .map_err(map_imap_error)
             })
@@ -60,7 +60,7 @@ impl ImapMailProvider {
             Box::pin(async move {
                 // `\Seen`: a message we sent has already been read by us.
                 session
-                    .append(&folder, Some("\\Seen"), None, raw)
+                    .append(&folder, Some("(\\Seen)"), None, raw)
                     .await
                     .map_err(map_imap_error)
             })
