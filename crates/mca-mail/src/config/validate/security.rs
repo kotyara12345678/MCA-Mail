@@ -51,10 +51,10 @@ pub fn check(config: &AppConfig) -> Result<(), ConfigError> {
         });
     }
     let card = &config.security.manager_card;
-    if card.enabled && card.recipient.trim().is_empty() {
+    if card.enabled && card.recipients().is_empty() {
         return Err(ConfigError::Invalid {
             field: "MANAGER_CARD_RECIPIENT".into(),
-            reason: "SEND_MANAGER_CARD=true needs a recipient address".into(),
+            reason: "SEND_MANAGER_CARD=true needs at least one recipient address".into(),
         });
     }
     if card.enabled && card.max_per_hour == 0 {

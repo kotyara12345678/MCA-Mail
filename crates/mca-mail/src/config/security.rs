@@ -112,9 +112,26 @@ pub struct ManagerCardSettings {
     /// Off by default: a pilot first proves the card on screen, then turns on
     /// delivery.
     pub enabled: bool,
+    /// One address, or several separated by commas or semicolons.
     pub recipient: String,
-    /// Ceiling per hour, independent of the customer-reply quota.
+    /// Ceiling per hour per address, independent of the customer-reply quota.
     pub max_per_hour: u32,
+}
+
+impl ManagerCardSettings {
+    /// Every address the card goes to, in configuration order.
+    ///
+    /// The deployment contract is one variable, `MANAGER_CARD_RECIPIENT`, and
+    /// an operator names the whole team in it — `a@x.com,b@y.com`. Each entry
+    /// becomes its own outbox row, so one manager's hourly ceiling, delivery
+    /// failures and audit trail never swallow another's.
+    pub fn recipients(&self) -> Vec<&str> {
+        self.recipient
+            .split([',', ';'])
+            .map(str::trim)
+            .filter(|address| !address.is_empty())
+            .collect()
+    }
 }
 
 impl Default for ManagerCardSettings {
@@ -199,5 +216,32 @@ mod tests {
         assert!(!EmailMode::Review.allows_sending());
         assert!(EmailMode::Auto.allows_sending());
         assert!(policy.auto_send);
+    }
+
+    #[test]
+    fn the_card_recipient_list_is_one_address_per_manager() {
+        let card = ManagerCardSettings {
+            recipient: "Savva@Gmail.com, parkin@mca-log.com".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(card.recipients(), ["Savva@Gmail.com", "parkin@mca-log.com"]);
+
+        let spaced = ManagerCardSettings {
+            recipient: "a@x.com;  b@y.com ,, ".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(spaced.recipients(), ["a@x.com", "b@y.com"]);
+    }
+
+    #[test]
+    fn no_recipient_is_an_empty_list_not_one_blank_address() {
+        let card = ManagerCardSettings::default();
+        assert!(card.recipients().is_empty());
+        assert!(ManagerCardSettings {
+            recipient: " , ; ".into(),
+            ..Default::default()
+        }
+        .recipients()
+        .is_empty());
     }
 }

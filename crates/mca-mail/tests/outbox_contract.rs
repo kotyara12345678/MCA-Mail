@@ -11,6 +11,7 @@ use std::sync::Arc;
 use mca_mail::application::workers::outbox_loop;
 use mca_mail::config::{AppConfig, EmailMode, MailMode};
 use mca_mail::mail::{MaybeWritable, MockMailProvider};
+use mca_mail::persistence::lead_repo;
 use mca_mail::persistence::outbox_repo::{self, OutboundIntent, OutboundKind};
 
 /// These tests share one database and one claim queue: a worker started here
@@ -213,6 +214,49 @@ async fn manager_cards_wait_while_their_switch_is_off() {
     let (status, denial, _) = row_status(&pool, &key).await;
     assert_eq!(status, "held");
     assert_eq!(denial, "manager_card_disabled");
+}
+
+/// One card per lead *per manager*: another address gets its own copy, the
+/// same address never gets a second one — even when the row already holding
+/// the card was queued under the older key that carried no address.
+#[tokio::test]
+async fn the_manager_card_is_unique_per_lead_and_recipient() {
+    let _guard = SERIAL.lock().await;
+    let pool = pool().await;
+    let lead = lead_repo::create_manual(&pool, &fresh_recipient(), None, None)
+        .await
+        .expect("lead");
+    let first = fresh_recipient();
+
+    let mut card = intent(&first, &format!("test:card:{}", uuid::Uuid::new_v4()));
+    card.message_type = OutboundKind::ManagerCard;
+    card.lead_id = Some(lead);
+    outbox_repo::enqueue_send(&pool, &card)
+        .await
+        .expect("first card")
+        .expect("a new card must be created");
+
+    // Same manager, a different key: the index, not the key, has the last word.
+    let mut again = intent(&first, &format!("test:card:{}", uuid::Uuid::new_v4()));
+    again.message_type = OutboundKind::ManagerCard;
+    again.lead_id = Some(lead);
+    assert!(
+        outbox_repo::enqueue_send(&pool, &again)
+            .await
+            .expect("second card")
+            .is_none(),
+        "the same manager must not receive a second card for one lead"
+    );
+
+    // A second manager is a different recipient, so it is a different card.
+    let second = fresh_recipient();
+    let mut other = intent(&second, &format!("test:card:{}", uuid::Uuid::new_v4()));
+    other.message_type = OutboundKind::ManagerCard;
+    other.lead_id = Some(lead);
+    outbox_repo::enqueue_send(&pool, &other)
+        .await
+        .expect("third card")
+        .expect("another manager must get their own card");
 }
 
 /// A delivered message must also land in the sent folder: that copy is the

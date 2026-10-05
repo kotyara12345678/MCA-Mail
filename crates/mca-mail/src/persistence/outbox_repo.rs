@@ -127,9 +127,13 @@ impl Default for OutboundIntent {
 
 /// Queue an outbound email.
 ///
-/// `ON CONFLICT DO NOTHING` on the idempotency key is the whole guarantee: a
-/// pipeline that runs twice, a duplicate event or a worker restarted mid-write
-/// all land on the same row and send once.
+/// `ON CONFLICT DO NOTHING` is the whole guarantee: a pipeline that runs
+/// twice, a duplicate event or a worker restarted mid-write all land on the
+/// same row and send once. No conflict target is named on purpose — a row can
+/// lose on the idempotency key *or* on `uq_outbox_manager_card_per_lead`,
+/// which allows one card per lead and recipient and therefore also covers the
+/// rows queued before the key learned the address. Losing either way means
+/// the winner already carries this message.
 pub async fn enqueue_send(
     pool: &PgPool,
     intent: &OutboundIntent,
@@ -139,8 +143,7 @@ pub async fn enqueue_send(
          in_reply_to, ref_headers, subject, body_text, body_html, idempotency_key, \
          correlation_id, status) \
          VALUES ($1,'send',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'queued') \
-         ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL \
-         DO NOTHING RETURNING id",
+         ON CONFLICT DO NOTHING RETURNING id",
     )
     .bind(intent.email_id)
     .bind(intent.message_type.as_str())

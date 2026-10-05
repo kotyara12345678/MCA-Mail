@@ -2,8 +2,8 @@
 //!
 //! Four claims have to hold together before this may touch a real customer:
 //! a reply the pipeline produced actually leaves the building, review mode
-//! still holds the very same reply, a qualified lead produces exactly one
-//! manager card to the configured address, and spam never reaches the outbox
+//! still holds the very same reply, a qualified lead produces one manager
+//! card to every configured address, and spam never reaches the outbox
 //! at all. The fifth is idempotency: one inbound email, one queued reply.
 
 use std::sync::Arc;
@@ -24,6 +24,8 @@ use mca_mail_testkit::replies;
 static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const MANAGER: &str = "savva.toch@gmail.com";
+/// A second manager on the same card: one address each, one copy each.
+const CO_MANAGER: &str = "parkin@mca-log.com";
 
 fn test_database_url() -> String {
     std::env::var("MCA_TEST_DATABASE_URL")
@@ -65,7 +67,7 @@ fn auto_config() -> AppConfig {
     cfg.security.outbound.max_sends_per_lead_per_hour = 1_000_000;
     cfg.security.outbound.min_interval_seconds = 0;
     cfg.security.manager_card.enabled = true;
-    cfg.security.manager_card.recipient = MANAGER.to_string();
+    cfg.security.manager_card.recipient = format!("{MANAGER},{CO_MANAGER}");
     cfg.security.manager_card.max_per_hour = 1_000_000;
     cfg
 }
@@ -236,12 +238,20 @@ async fn outbox_for_lead(pool: &sqlx::PgPool, lead_id: LeadId) -> Vec<(String, S
     .expect("read outbox")
 }
 
-async fn outbox_status(pool: &sqlx::PgPool, lead_id: LeadId, kind: &str) -> String {
+/// Status of the one row this lead has for `kind` and `recipient`.
+async fn outbox_status(
+    pool: &sqlx::PgPool,
+    lead_id: LeadId,
+    kind: &str,
+    recipient: &str,
+) -> String {
     sqlx::query_scalar::<_, String>(
-        "SELECT status FROM mailbox_outbox WHERE lead_id = $1 AND message_type = $2",
+        "SELECT status FROM mailbox_outbox \
+         WHERE lead_id = $1 AND message_type = $2 AND recipient = $3",
     )
     .bind(lead_id)
     .bind(kind)
+    .bind(recipient)
     .fetch_one(pool)
     .await
     .expect("outbox row")
@@ -326,7 +336,7 @@ async fn auto_send_dispatches_the_reply_the_model_held_back() {
 
     assert_eq!(sent_to(&mock, &buyer).await, 1, "exactly one delivery");
     assert_eq!(
-        outbox_status(&pool, lead_id, "customer_reply").await,
+        outbox_status(&pool, lead_id, "customer_reply", &buyer).await,
         "sent"
     );
 }
@@ -369,7 +379,7 @@ async fn review_mode_keeps_the_same_reply_as_a_draft() {
 }
 
 #[tokio::test]
-async fn a_qualified_lead_queues_one_manager_card_to_the_configured_address() {
+async fn a_qualified_lead_queues_one_manager_card_per_configured_address() {
     let _guard = SERIAL.lock().await;
     let pool = setup_db().await;
     let llm = Arc::new(MockLlmProvider::new(&mock_llm_settings()));
@@ -393,22 +403,29 @@ async fn a_qualified_lead_queues_one_manager_card_to_the_configured_address() {
         .expect("get")
         .lead_id
         .expect("a lead must open");
-    let queued = outbox_for_lead(&pool, lead_id).await;
+    let mut queued = outbox_for_lead(&pool, lead_id).await;
+    queued.sort();
+    let mut expected = vec![
+        (
+            "customer_reply".to_string(),
+            buyer.clone(),
+            "queued".to_string(),
+        ),
+        (
+            "manager_card".to_string(),
+            MANAGER.to_string(),
+            "queued".to_string(),
+        ),
+        (
+            "manager_card".to_string(),
+            CO_MANAGER.to_string(),
+            "queued".to_string(),
+        ),
+    ];
+    expected.sort();
     assert_eq!(
-        queued,
-        vec![
-            (
-                "customer_reply".to_string(),
-                buyer.clone(),
-                "queued".to_string()
-            ),
-            (
-                "manager_card".to_string(),
-                MANAGER.to_string(),
-                "queued".to_string()
-            ),
-        ],
-        "a completed lead must queue one reply and one card to the manager"
+        queued, expected,
+        "a completed lead must queue one reply and a card to every manager"
     );
 
     let mock = writer();
@@ -419,17 +436,28 @@ async fn a_qualified_lead_queues_one_manager_card_to_the_configured_address() {
     assert_eq!(
         sent_to(&mock, MANAGER).await,
         1,
-        "exactly one card reached the manager"
+        "exactly one card reached the first manager"
     );
-    assert_eq!(outbox_status(&pool, lead_id, "manager_card").await, "sent");
+    assert_eq!(
+        sent_to(&mock, CO_MANAGER).await,
+        1,
+        "exactly one card reached the second manager"
+    );
+    for manager in [MANAGER, CO_MANAGER] {
+        assert_eq!(
+            outbox_status(&pool, lead_id, "manager_card", manager).await,
+            "sent",
+            "the card to {manager} was delivered"
+        );
+    }
 
-    // One card per lead, ever: the same lead going through the pipeline again
-    // must collapse onto the key it already used.
+    // One card per lead and address, ever: the same lead going through the
+    // pipeline again must collapse onto the keys it already used.
     orch.process_email(id).await.expect("reprocess");
     assert_eq!(
         outbox_for_lead(&pool, lead_id).await.len(),
-        2,
-        "reprocessing must not queue a second card"
+        3,
+        "reprocessing must not queue a second card for any manager"
     );
 }
 

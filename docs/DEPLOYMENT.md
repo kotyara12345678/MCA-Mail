@@ -141,7 +141,9 @@ Roles: `viewer` (read) → `operator` → `manager` → `admin`. Revoke by the
    `EMAIL_AUTO_SEND=true`. Both gates must be open — with `EMAIL_MODE=review`
    the same reply is prepared but held as a draft for a human.
 7. Manager card switched on: `SEND_MANAGER_CARD=true` with
-   `MANAGER_CARD_RECIPIENT=<manager address>`. An empty recipient silently
+   `MANAGER_CARD_RECIPIENT=<manager address>[,<another address>]` — commas (or
+   semicolons) separate the team, every address receives its own copy of the
+   card. An empty recipient silently
    skips the card, so an unconfigured address looks like a silent failure.
 8. Confirm retention policy (defaults: 365d emails, 180d events, 1095d audit).
 9. Verify `LLM_API_KEY` budget and model prices.
