@@ -72,11 +72,15 @@ pub async fn connect(settings: &ImapSettings) -> Result<ImapStreamKind, MailErro
     let _ = socket.set_nodelay(true);
 
     if settings.tls == TlsMode::Implicit {
-        wrap_tls(
-            &settings.host,
+        handshake_timeout(
+            settings,
             &address,
-            socket,
-            settings.allow_invalid_certs,
+            wrap_tls(
+                &settings.host,
+                &address,
+                socket,
+                settings.allow_invalid_certs,
+            ),
         )
         .await
     } else {
@@ -84,16 +88,38 @@ pub async fn connect(settings: &ImapSettings) -> Result<ImapStreamKind, MailErro
     }
 }
 
+/// A handshake that stalls must fail like a connect that stalls.
+///
+/// It runs while the caller holds the session lock, so an unbounded read here
+/// would stop the mailbox in the same way a silent command would.
+async fn handshake_timeout(
+    settings: &ImapSettings,
+    address: &str,
+    handshake: impl std::future::Future<Output = Result<ImapStreamKind, MailError>>,
+) -> Result<ImapStreamKind, MailError> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(settings.connect_timeout_seconds.max(1)),
+        handshake,
+    )
+    .await
+    .map_err(|_| MailError::Connect(format!("tls handshake with {address} timed out")))?
+}
+
 /// Wrap an already-upgraded socket in TLS after a successful `STARTTLS`.
 pub async fn upgrade_to_tls(
     settings: &ImapSettings,
     socket: TcpStream,
 ) -> Result<ImapStreamKind, MailError> {
-    wrap_tls(
-        &settings.host,
-        &format!("{}:{}", settings.host, settings.port),
-        socket,
-        settings.allow_invalid_certs,
+    let address = format!("{}:{}", settings.host, settings.port);
+    handshake_timeout(
+        settings,
+        &address,
+        wrap_tls(
+            &settings.host,
+            &address,
+            socket,
+            settings.allow_invalid_certs,
+        ),
     )
     .await
 }

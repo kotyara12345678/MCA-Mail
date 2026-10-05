@@ -56,10 +56,18 @@ pub(crate) async fn connect(
     .map_err(|(error, _client)| login_error(error))?;
 
     let inbox = folder(&mail.imap, mail.imap.inbox.as_str());
+    // Selecting is a command like any other: a server that never answers it
+    // would leave the caller holding the session lock indefinitely.
     if read_only {
-        session.examine(inbox).await.map_err(map_imap_error)?;
+        tokio::time::timeout(timeout, session.examine(inbox))
+            .await
+            .map_err(|_| MailError::Protocol("IMAP examine timed out".into()))?
+            .map_err(map_imap_error)?;
     } else {
-        session.select(inbox).await.map_err(map_imap_error)?;
+        tokio::time::timeout(timeout, session.select(inbox))
+            .await
+            .map_err(|_| MailError::Protocol("IMAP select timed out".into()))?
+            .map_err(map_imap_error)?;
     }
     Ok(session)
 }

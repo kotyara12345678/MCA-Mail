@@ -10,6 +10,8 @@ mod mutations;
 mod provider;
 pub(crate) mod read;
 mod session;
+#[cfg(test)]
+mod timeout_tests;
 mod writer;
 
 /// After `LOGIN` the client becomes a `Session`; the two differ only in that the
@@ -113,19 +115,35 @@ impl ImapMailProvider {
                 last_success_at: None,
             });
         }
+        // A command the server never answers would otherwise hold this lock for
+        // ever: every later IMAP operation queues behind it, so the mailbox
+        // stops moving while the health check keeps reporting healthy. The
+        // deadline is the same one login and STARTTLS already use.
+        let timeout = session::command_timeout(&self.mail);
         let open = guard.as_mut().expect("session just established");
-        match op(&mut open.session).await {
-            Ok(value) => {
+        let outcome = tokio::time::timeout(timeout, op(&mut open.session)).await;
+        match outcome {
+            Ok(Ok(value)) => {
                 open.last_success_at = Some(chrono::Utc::now());
                 Ok(value)
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 // Any protocol error leaves the stream in an unknown state.
                 // Dropping it is cheaper than diagnosing a desynchronised session.
                 if is_fatal(&error) {
                     *guard = None;
                 }
                 Err(error)
+            }
+            Err(_elapsed) => {
+                // The reply is not coming, so where the stream stands in the
+                // protocol is unknown. Dropping the session lets the next call
+                // reconnect instead of waiting for an answer that never arrives.
+                *guard = None;
+                Err(MailError::Unavailable(format!(
+                    "imap command timed out after {}s",
+                    timeout.as_secs()
+                )))
             }
         }
     }
@@ -141,7 +159,12 @@ impl ImapMailProvider {
         let Some(mut open) = guard.take() else {
             return Ok(());
         };
-        open.session.logout().await.map_err(read::map_imap_error)
+        // The session is already out of the pool, so a `LOGOUT` the server
+        // ignores must not be able to hold shutdown open for ever.
+        tokio::time::timeout(session::command_timeout(&self.mail), open.session.logout())
+            .await
+            .map_err(|_| MailError::Unavailable("imap logout timed out".into()))?
+            .map_err(read::map_imap_error)
     }
 }
 
