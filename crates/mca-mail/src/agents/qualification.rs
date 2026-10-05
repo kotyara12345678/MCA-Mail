@@ -87,8 +87,10 @@ contact_telegram, contact_preferred_channel, additional_requirements.
 Rules:
 - Do NOT invent missing data.
 - Distinguish stated facts from your inferences.
-- Return questions for missing critical information. Never repeat a question
-  that appears in the "already asked" list below.
+- Return in "questions" every question still needed to complete the
+  extraction, all of them at once, so the reply can ask for the whole lot in
+  a single message. Never repeat a question that appears in the "already
+  asked" list below.
 - If the email asks for a phone call, set needs_expert=true.
 
 Respond with JSON: {"lead_id": null, "first_email_id": null, "company_name": null, "contact_name": null, "contact_phone": null, "summary": "", "scope": "transport|customs|procurement|full_import", "needs_expert": false, "questions": [], "confidence": 0.0, "regulated_topics": [], "requirements": []}"#;

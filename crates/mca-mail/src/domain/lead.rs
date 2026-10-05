@@ -128,6 +128,30 @@ impl Lead {
             .collect()
     }
 
+    /// Every field the customer has not filled in yet.
+    ///
+    /// Broader than [`Self::blocking_gaps`]: that one decides when a quote is
+    /// possible, this one decides what the reply has to ask for. Fields the
+    /// scope already ruled out come back `not_applicable`, which is trusted,
+    /// so they drop out here the same way they do there.
+    pub fn open_gaps(
+        requirements: &[super::requirement::LeadRequirement],
+    ) -> Vec<RequirementField> {
+        let mut gaps: Vec<RequirementField> = requirements
+            .iter()
+            .filter(|r| !r.state.is_trusted() && r.value.is_none())
+            .map(|r| r.field)
+            .collect();
+        // Canonical order, so the reply prompt reads the same on every run.
+        gaps.sort_by_key(|f| {
+            RequirementField::ALL
+                .iter()
+                .position(|candidate| candidate == f)
+                .unwrap_or(usize::MAX)
+        });
+        gaps
+    }
+
     /// Values the customer stated, safe to show a manager as fact.
     pub fn confirmed_facts(
         requirements: &[super::requirement::LeadRequirement],

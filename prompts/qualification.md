@@ -17,7 +17,9 @@ Extract commercial details from potential client emails for MCA Logistics.
 
 - Do NOT invent missing data
 - Distinguish stated facts from inferences
-- Return questions for missing critical information
+- Return in "questions" every question still needed to complete the
+  extraction, all of them at once, so the reply can ask for the whole lot in
+  a single message
 - If the email asks for a phone call or pricing, flag for handoff
 
 ## Output

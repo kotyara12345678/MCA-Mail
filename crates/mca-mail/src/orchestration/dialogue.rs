@@ -23,7 +23,12 @@ pub struct Dialogue {
     /// Normalised form of [`Self::asked`], for repeat detection.
     pub asked_norm: Vec<String>,
     pub requirements: Vec<LeadRequirement>,
+    /// Fields that still prevent MCA from quoting the request.
     pub missing: Vec<RequirementField>,
+    /// Every field the customer has not given us yet. This, not
+    /// [`Self::missing`], is what the reply agent is asked to collect: the
+    /// quote-blocking subset only decides when the dialogue may end.
+    pub open: Vec<RequirementField>,
     pub outbound_count: i64,
     /// Consecutive outbound messages with no customer reply in between.
     pub unanswered: i64,
@@ -45,12 +50,14 @@ impl Dialogue {
 
         let asked_norm = asked.iter().map(|q| normalize_question(q)).collect();
         let missing = crate::domain::Lead::blocking_gaps(&requirements);
+        let open = crate::domain::Lead::open_gaps(&requirements);
         let complete = missing.is_empty();
         Ok(Dialogue {
             asked,
             asked_norm,
             requirements,
             missing,
+            open,
             outbound_count,
             unanswered,
             locked,
