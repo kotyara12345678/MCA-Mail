@@ -9,8 +9,11 @@
 //! offending key by name and never echoes a secret value.
 
 mod agents;
+mod backup;
 mod env;
+mod env_tree;
 mod llm;
+mod mail_mode;
 mod secret;
 mod security;
 mod settings;
@@ -22,18 +25,21 @@ mod validate;
 mod tests;
 
 pub use agents::{AgentSettings, ResearchSettings, RetentionSettings, ToolSettings};
+pub use backup::BackupSettings;
 pub use llm::{LlmProviderKind, LlmSettings, ModelPrice, ModelRouting};
+pub use mail_mode::MailMode;
 pub use secret::Secret;
-pub use security::{AttachmentPolicy, ContextPolicy, EmailMode, InboundPolicy, OutboundPolicy};
+pub use security::{
+    AttachmentPolicy, ContextPolicy, EmailMode, InboundPolicy, ManagerCardSettings, OutboundPolicy,
+};
 pub use settings::{
-    ApiSettings, AppSettings, DatabaseSettings, ImapSettings, LogFormat, MailProviderKind,
-    MailSettings, SecuritySettings, SmtpSettings, TlsMode,
+    ApiSettings, AppSettings, DatabaseSettings, IdleSettings, ImapSettings, LogFormat,
+    MailProviderKind, MailSettings, SecuritySettings, SmtpSettings, TlsMode,
 };
 
 use figment::providers::{Format, Serialized, Toml};
 use figment::{Figment, Profile};
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 
 use crate::error::ConfigError;
 
@@ -43,6 +49,7 @@ use crate::error::ConfigError;
 pub struct AppConfig {
     pub app: AppSettings,
     pub api: ApiSettings,
+    pub backup: BackupSettings,
     pub database: DatabaseSettings,
     pub mail: MailSettings,
     pub llm: LlmSettings,
@@ -55,15 +62,13 @@ pub struct AppConfig {
 impl AppConfig {
     /// Load from defaults + optional TOML + environment.
     pub fn load() -> Result<Self, ConfigError> {
-        // A missing `.env` is normal in production, where the orchestrator
-        // injects real environment variables.
-        let _ = dotenvy::dotenv();
+        load_dotenv()?;
         Self::from_sources("config/default.toml", "config/local.toml")
     }
 
     /// Load with explicit file paths, used by tests and the CLI.
     pub fn from_files(defaults: &str, local: &str) -> Result<Self, ConfigError> {
-        let _ = dotenvy::dotenv();
+        load_dotenv()?;
         Self::from_sources(defaults, local)
     }
 
@@ -76,8 +81,8 @@ impl AppConfig {
         // declared mapping. A nested path is set one component at a time, so a
         // variable like `LLM_MODEL` never overwrites the whole `llm` struct and
         // the remaining fields keep their defaults.
-        let env_tree = build_env_tree();
-        let figment = figment.merge(Serialized::from(env_tree, Profile::Default));
+        let environment = env_tree::build();
+        let figment = figment.merge(Serialized::from(environment, Profile::Default));
 
         figment
             .extract()
@@ -98,65 +103,22 @@ impl AppConfig {
     }
 }
 
-/// Build a nested JSON tree from environment variables.
+/// Load `.env` when there is one.
 ///
-/// Only variables declared in the mapping tables are collected. Each value is
-/// parsed as JSON when possible (`true`, `123`, `"text"`) and otherwise kept
-/// as a string, so figment can coerce it to the target field type.
-fn build_env_tree() -> JsonValue {
-    let mut root = serde_json::Map::new();
-
-    for (flat, nested) in env::all_pairs() {
-        let Some(raw) = std::env::var(flat).ok() else {
-            continue;
-        };
-        if raw.trim().is_empty() {
-            continue;
-        }
-        let value = parse_env_value(&raw);
-        insert_path(&mut root, nested, value);
-    }
-
-    JsonValue::Object(root)
+/// A missing file is normal in production, where the orchestrator injects real
+/// environment variables, so that case stays silent. A `.env` that exists but
+/// cannot be read or parsed is not: continuing would start the service with
+/// whatever subset of the variables happened to load, which is how a pilot
+/// ends up pointed at the wrong mailbox.
+fn load_dotenv() -> Result<(), ConfigError> {
+    interpret_dotenv(dotenvy::dotenv())
 }
 
-fn parse_env_value(raw: &str) -> JsonValue {
-    let trimmed = raw.trim();
-    // Treat booleans, integers and floats as JSON literals.
-    if trimmed.eq_ignore_ascii_case("true") {
-        return JsonValue::Bool(true);
-    }
-    if trimmed.eq_ignore_ascii_case("false") {
-        return JsonValue::Bool(false);
-    }
-    if let Ok(n) = trimmed.parse::<i64>() {
-        return JsonValue::Number(n.into());
-    }
-    if let Ok(f) = trimmed.parse::<f64>() {
-        if let Some(n) = serde_json::Number::from_f64(f) {
-            return JsonValue::Number(n);
-        }
-    }
-    JsonValue::String(raw.to_string())
-}
-
-fn insert_path(root: &mut serde_json::Map<String, JsonValue>, path: &str, value: JsonValue) {
-    let parts: Vec<&str> = path.split('.').collect();
-    if parts.is_empty() {
-        return;
-    }
-    let mut current = root;
-    for (i, part) in parts.iter().enumerate() {
-        if i == parts.len() - 1 {
-            current.insert(part.to_string(), value);
-            return;
-        }
-        let entry = current
-            .entry(part.to_string())
-            .or_insert_with(|| JsonValue::Object(serde_json::Map::new()));
-        if !entry.is_object() {
-            *entry = JsonValue::Object(serde_json::Map::new());
-        }
-        current = entry.as_object_mut().unwrap();
+/// Split out so the decision — not the filesystem — is what gets tested.
+fn interpret_dotenv(found: Result<std::path::PathBuf, dotenvy::Error>) -> Result<(), ConfigError> {
+    match found {
+        Ok(_) => Ok(()),
+        Err(err) if err.not_found() => Ok(()),
+        Err(err) => Err(ConfigError::EnvFile(err.to_string())),
     }
 }

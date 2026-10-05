@@ -114,12 +114,16 @@ pub struct Lead {
 
 impl Lead {
     /// All fields that still prevent MCA from quoting the request.
+    ///
+    /// A value the model read but could not quote verbatim still unblocks the
+    /// quote — it is `needs_confirmation`, not missing. Only a field with no
+    /// value at all blocks.
     pub fn blocking_gaps(
         requirements: &[super::requirement::LeadRequirement],
     ) -> Vec<RequirementField> {
         requirements
             .iter()
-            .filter(|r| r.field.is_quote_blocking() && !r.state.is_trusted())
+            .filter(|r| r.field.is_quote_blocking() && !r.state.is_trusted() && r.value.is_none())
             .map(|r| r.field)
             .collect()
     }

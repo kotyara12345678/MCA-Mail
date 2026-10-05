@@ -59,7 +59,7 @@ pub struct EmailSummaryRow {
     pub from_address: String,
     pub from_name: Option<String>,
     pub subject: String,
-    received_at: DateTime<Utc>,
+    pub received_at: DateTime<Utc>,
     pub lead_id: Option<Uuid>,
     pub size_bytes: i64,
     pub attempts: i32,

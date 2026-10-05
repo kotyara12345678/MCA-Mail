@@ -85,10 +85,7 @@ pub trait Agent: Send + Sync {
 
         serde_json::from_str::<T>(json_str).map_err(|e| AgentError::InvalidOutput {
             agent: self.kind(),
-            reason: format!(
-                "JSON parse error: {e}. Raw: {}",
-                prompt::truncate_utf8(&response.content, 300)
-            ),
+            reason: format!("JSON parse error: {e}"),
         })
     }
 

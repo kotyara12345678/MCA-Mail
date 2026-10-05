@@ -5,7 +5,9 @@ use tracing::info;
 use super::pipeline::call_agent;
 use super::{AgentContextBuilder, Orchestrator};
 use crate::agents::{ClassificationAgent, SpamAgent};
-use crate::domain::{AgentKind, EmailCategory, EmailStatus, ProcessingStage, RunId, SpamVerdict};
+use crate::domain::{
+    confident_spam, AgentKind, EmailCategory, EmailStatus, ProcessingStage, RunId, SpamVerdict,
+};
 use crate::error::AppError;
 use crate::observability::Correlation;
 use crate::persistence::{email_repo, run_repo};
@@ -38,8 +40,13 @@ impl Orchestrator {
 
         match assessment.verdict {
             SpamVerdict::Spam | SpamVerdict::Advertisement => {
-                info!(verdict = ?assessment.verdict, "spam detected");
-                return Ok(Some(EmailStatus::Quarantined));
+                if confident_spam(assessment.verdict, assessment.confidence) {
+                    info!(verdict = ?assessment.verdict, "high-confidence spam detected");
+                    self.quarantine_spam(corr, &ctx.email).await;
+                    return Ok(Some(EmailStatus::Quarantined));
+                }
+                info!(verdict = ?assessment.verdict, "low-confidence spam sent for review");
+                return Ok(Some(EmailStatus::NeedsReview));
             }
             SpamVerdict::PhishingSuspected => {
                 info!("phishing suspected, needs review");
@@ -77,8 +84,14 @@ impl Orchestrator {
         email_repo::set_category(&self.pool, *email_id, category).await?;
 
         let early = match category {
-            EmailCategory::Spam => Some(EmailStatus::Quarantined),
+            EmailCategory::Spam if confident_spam(SpamVerdict::Spam, outcome.confidence) => {
+                Some(EmailStatus::Quarantined)
+            }
+            EmailCategory::Spam => Some(EmailStatus::NeedsReview),
             EmailCategory::Advertisement | EmailCategory::Internal => Some(EmailStatus::Processed),
+            // "other" means the model recognised no business shape: a person
+            // has to look, and no lead or reply may be produced from it.
+            EmailCategory::Other => Some(EmailStatus::NeedsReview),
             _ => None,
         };
         Ok((category, early))

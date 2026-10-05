@@ -5,7 +5,10 @@
 
 pub mod crm;
 pub mod mail;
+pub mod mode_filter;
 pub mod support;
+
+pub use mode_filter::{allowed_in, filter_for_mode, mutates_mailbox};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -136,19 +139,24 @@ impl ToolRegistry {
                     &r.summary,
                     duration_ms,
                 );
-                match tool_name {
-                    "move_email" => crate::observability::actions::email_moved(
-                        email_id,
-                        folder.as_deref().unwrap_or("unknown"),
-                    ),
-                    "archive_email" => {
-                        crate::observability::actions::email_moved(email_id, "archive")
+                // The side effects below belong to the action, not to the
+                // attempt: a handler that answered "nothing happened" must not
+                // leave an audit entry saying an email was moved.
+                if r.success {
+                    match tool_name {
+                        "move_email" => crate::observability::actions::email_moved(
+                            email_id,
+                            folder.as_deref().unwrap_or("unknown"),
+                        ),
+                        "archive_email" => {
+                            crate::observability::actions::email_moved(email_id, "archive")
+                        }
+                        "label_email" => crate::observability::actions::email_labeled(
+                            email_id,
+                            label.as_deref().unwrap_or("unknown"),
+                        ),
+                        _ => {}
                     }
-                    "label_email" => crate::observability::actions::email_labeled(
-                        email_id,
-                        label.as_deref().unwrap_or("unknown"),
-                    ),
-                    _ => {}
                 }
             }
             Err(e) => crate::observability::tools::tool_failed(

@@ -44,12 +44,15 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
     }
 }
 
-/// Docker HEALTHCHECK: GET /health on a local instance, exit non-zero when it
-/// is unreachable or unhealthy. Uses loopback because the bound host is often
-/// `0.0.0.0`, which is not a connectable destination on some systems.
+/// Docker HEALTHCHECK: GET /ready on a local instance, exit non-zero when it
+/// is unreachable or reports 503. `/ready` rather than `/health` on purpose:
+/// liveness only proves the process answers HTTP, while readiness is the one
+/// that fails once the database is gone — the state an operator actually needs
+/// surfaced in `docker compose ps`. Uses loopback because the bound host is
+/// often `0.0.0.0`, which is not a connectable destination on some systems.
 async fn healthcheck() -> anyhow::Result<()> {
     let config = AppConfig::load().context("loading configuration (.env)")?;
-    let url = format!("http://127.0.0.1:{}/health", config.api.port);
+    let url = format!("http://127.0.0.1:{}/ready", config.api.port);
     let response = reqwest::Client::new()
         .get(&url)
         .timeout(std::time::Duration::from_secs(5))

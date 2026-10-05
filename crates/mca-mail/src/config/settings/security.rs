@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::security::{
-    AttachmentPolicy, ContextPolicy, EmailMode, InboundPolicy, OutboundPolicy,
+    AttachmentPolicy, ContextPolicy, EmailMode, InboundPolicy, ManagerCardSettings, OutboundPolicy,
 };
 
 /// Where every guard rail is configured, in one place, so the API can report the
@@ -14,6 +14,8 @@ pub struct SecuritySettings {
     pub inbound: InboundPolicy,
     pub attachments: AttachmentPolicy,
     pub context: ContextPolicy,
+    /// Manager card delivery: recipient and the switch that turns it on.
+    pub manager_card: ManagerCardSettings,
     /// Directory holding `*.md` prompt files.
     pub prompts_dir: String,
     /// Per-task USD ceiling expressed in micro-dollars.
@@ -31,6 +33,7 @@ impl Default for SecuritySettings {
             inbound: InboundPolicy::default(),
             attachments: AttachmentPolicy::default(),
             context: ContextPolicy::default(),
+            manager_card: ManagerCardSettings::default(),
             prompts_dir: "prompts".to_string(),
             max_cost_micros_per_task: 500_000,
             max_cost_micros_per_hour: 5_000_000,

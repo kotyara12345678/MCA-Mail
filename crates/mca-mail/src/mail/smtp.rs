@@ -55,9 +55,7 @@ impl SmtpTransport {
             return Err(MailError::Connect("MAIL_SMTP_HOST is empty".into()));
         }
         if smtp.from_address.trim().is_empty() {
-            return Err(MailError::Rejected(
-                "MAIL_SMTP_FROM_ADDRESS is empty".into(),
-            ));
+            return Err(MailError::Rejected("MAIL_FROM_ADDRESS is empty".into()));
         }
         let tls = tls_mode(smtp.tls, &smtp.host)?;
         let transport = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&smtp.host)

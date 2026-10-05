@@ -14,6 +14,7 @@ struct RequirementRow {
     source: String,
     unit: Option<String>,
     confidence: Option<f32>,
+    evidence: Option<String>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -26,15 +27,18 @@ fn to_domain(row: RequirementRow) -> Result<LeadRequirement, AppError> {
         source: parse_enum::<RequirementSource>(&row.source, "lead_requirements.source")?,
         unit: row.unit,
         confidence: row.confidence,
+        evidence: row.evidence,
         updated_at: row.updated_at,
     })
 }
 
+const COLUMNS: &str = "lead_id, field, value, state, source, unit, confidence, evidence, \
+     updated_at";
+
 pub async fn all(pool: &PgPool, lead_id: LeadId) -> Result<Vec<LeadRequirement>, AppError> {
-    let rows = sqlx::query_as::<_, RequirementRow>(
-        "SELECT lead_id, field, value, state, source, unit, confidence, updated_at \
-         FROM lead_requirements WHERE lead_id = $1",
-    )
+    let rows = sqlx::query_as::<_, RequirementRow>(&format!(
+        "SELECT {COLUMNS} FROM lead_requirements WHERE lead_id = $1"
+    ))
     .bind(lead_id)
     .fetch_all(pool)
     .await?;
@@ -45,7 +49,10 @@ pub async fn all(pool: &PgPool, lead_id: LeadId) -> Result<Vec<LeadRequirement>,
 ///
 /// A value the customer stated (`known`) never gets overwritten by an inference
 /// (`needs_confirmation`), and a manager's value always wins: this ordering is
-/// what keeps the CRM honest about where each fact came from.
+/// what keeps the CRM honest about where each fact came from. The same rule is
+/// applied to `evidence`, so a kept value never loses the span that justifies
+/// it. Re-running the same batch is a no-op, which is what makes a replayed
+/// worker safe.
 pub async fn upsert_many(
     pool: &PgPool,
     lead_id: LeadId,
@@ -59,20 +66,24 @@ pub async fn upsert_many(
     for r in requirements {
         let rows = sqlx::query(
             "INSERT INTO lead_requirements (lead_id, field, value, state, source, unit, \
-             confidence) VALUES ($1,$2,$3,$4,$5,$6,$7) \
+             confidence, evidence) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) \
              ON CONFLICT (lead_id, field) DO UPDATE SET \
                value = CASE WHEN EXCLUDED.source = 'customer' THEN EXCLUDED.value \
-                             WHEN lead_requirements.source = 'customer' \
+                             WHEN lead_requirements.source IN ('customer','manager') \
                                   AND EXCLUDED.state <> 'not_applicable' \
                              THEN lead_requirements.value ELSE EXCLUDED.value END, \
-               state = CASE WHEN lead_requirements.source = 'customer' \
+               state = CASE WHEN lead_requirements.source IN ('customer','manager') \
                                   AND EXCLUDED.source = 'ai_inference' \
                              THEN lead_requirements.state ELSE EXCLUDED.state END, \
-               source = CASE WHEN lead_requirements.source = 'customer' \
+               source = CASE WHEN lead_requirements.source IN ('customer','manager') \
                                   AND EXCLUDED.source = 'ai_inference' \
                              THEN lead_requirements.source ELSE EXCLUDED.source END, \
                unit = COALESCE(EXCLUDED.unit, lead_requirements.unit), \
                confidence = COALESCE(EXCLUDED.confidence, lead_requirements.confidence), \
+               evidence = CASE WHEN EXCLUDED.source = 'customer' THEN EXCLUDED.evidence \
+                               WHEN lead_requirements.source IN ('customer','manager') \
+                                    AND EXCLUDED.state <> 'not_applicable' \
+                               THEN lead_requirements.evidence ELSE EXCLUDED.evidence END, \
                updated_at = now()",
         )
         .bind(lead_id)
@@ -82,6 +93,7 @@ pub async fn upsert_many(
         .bind(r.source.as_str())
         .bind(&r.unit)
         .bind(r.confidence)
+        .bind(&r.evidence)
         .execute(&mut *tx)
         .await
         .map_err(|e| tx_failure("upsert_many", e))?;
@@ -154,10 +166,9 @@ pub async fn get_field(
     lead_id: LeadId,
     field: RequirementField,
 ) -> Result<Option<LeadRequirement>, AppError> {
-    let row = sqlx::query_as::<_, RequirementRow>(
-        "SELECT lead_id, field, value, state, source, unit, confidence, updated_at \
-         FROM lead_requirements WHERE lead_id = $1 AND field = $2",
-    )
+    let row = sqlx::query_as::<_, RequirementRow>(&format!(
+        "SELECT {COLUMNS} FROM lead_requirements WHERE lead_id = $1 AND field = $2"
+    ))
     .bind(lead_id)
     .bind(field.as_str())
     .fetch_optional(pool)

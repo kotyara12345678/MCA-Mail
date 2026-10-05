@@ -72,7 +72,13 @@ pub async fn connect(settings: &ImapSettings) -> Result<ImapStreamKind, MailErro
     let _ = socket.set_nodelay(true);
 
     if settings.tls == TlsMode::Implicit {
-        wrap_tls(&address, socket, settings.allow_invalid_certs).await
+        wrap_tls(
+            &settings.host,
+            &address,
+            socket,
+            settings.allow_invalid_certs,
+        )
+        .await
     } else {
         Ok(ImapStreamKind::Plain(socket))
     }
@@ -84,6 +90,7 @@ pub async fn upgrade_to_tls(
     socket: TcpStream,
 ) -> Result<ImapStreamKind, MailError> {
     wrap_tls(
+        &settings.host,
         &format!("{}:{}", settings.host, settings.port),
         socket,
         settings.allow_invalid_certs,
@@ -92,6 +99,7 @@ pub async fn upgrade_to_tls(
 }
 
 async fn wrap_tls(
+    server_name: &str,
     address: &str,
     socket: TcpStream,
     allow_invalid_certs: bool,
@@ -103,7 +111,7 @@ async fn wrap_tls(
         TlsConnector::new()
     };
     let tls = connector
-        .connect(address, socket)
+        .connect(server_name, socket)
         .await
         .map_err(|e| MailError::Connect(format!("tls handshake with {address}: {e}")))?;
     Ok(ImapStreamKind::Tls(Box::new(tls)))

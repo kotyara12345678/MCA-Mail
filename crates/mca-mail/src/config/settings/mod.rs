@@ -10,5 +10,5 @@ mod security;
 pub use api::ApiSettings;
 pub use app::{AppSettings, LogFormat};
 pub use database::DatabaseSettings;
-pub use mail::{ImapSettings, MailProviderKind, MailSettings, SmtpSettings, TlsMode};
+pub use mail::{IdleSettings, ImapSettings, MailProviderKind, MailSettings, SmtpSettings, TlsMode};
 pub use security::SecuritySettings;

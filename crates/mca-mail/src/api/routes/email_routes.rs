@@ -1,7 +1,7 @@
 //! Email-related API endpoints.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     routing::{get, post},
     Json, Router,
 };
@@ -11,9 +11,10 @@ use uuid::Uuid;
 
 use crate::api::auth::{AuthError, AuthenticatedRequest};
 use crate::api::ApiState;
-use crate::domain::{EmailId, EmailStatus, StoredEmail};
+use crate::domain::{EmailCategory, EmailId, EmailStatus, StoredEmail};
+use crate::error::AppError;
 use crate::persistence::api_key_repo::Role;
-use crate::persistence::email_repo;
+use crate::persistence::email_repo::{self, EmailFilter};
 
 #[derive(Serialize)]
 struct EmailListResponse {
@@ -60,30 +61,108 @@ struct ActionResponse {
     message: String,
 }
 
+#[derive(Deserialize)]
+struct EmailListQuery {
+    status: Option<String>,
+    category: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+/// Default page size. The list is a work queue, not a mail client: 50 rows is
+/// a screenful, and the caller can page from there.
+const DEFAULT_PAGE: i64 = 50;
+
+fn parse_status(raw: &str) -> Result<EmailStatus, AppError> {
+    raw.parse()
+        .map_err(|_| AppError::InvalidInput(format!("unknown email status: {raw}")))
+}
+
+fn parse_category(raw: &str) -> Result<EmailCategory, AppError> {
+    raw.parse()
+        .map_err(|_| AppError::InvalidInput(format!("unknown email category: {raw}")))
+}
+
 async fn list_emails(
-    State(_state): State<Arc<ApiState>>,
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<EmailListQuery>,
     _auth: AuthenticatedRequest,
-) -> Json<EmailListResponse> {
-    // Simplified listing — in production, add pagination and filtering
-    let items = Vec::new(); // Placeholder for real query
-    Json(EmailListResponse { items, total: 0 })
+) -> Result<Json<EmailListResponse>, AppError> {
+    let filter = EmailFilter {
+        status: query.status.as_deref().map(parse_status).transpose()?,
+        category: query.category.as_deref().map(parse_category).transpose()?,
+        limit: query.limit.unwrap_or(DEFAULT_PAGE),
+        offset: query.offset.unwrap_or(0),
+        ..Default::default()
+    };
+
+    let total = email_repo::count(&state.pool, &filter).await?;
+    let items = email_repo::list(&state.pool, &filter)
+        .await?
+        .into_iter()
+        .map(|row| EmailSummary {
+            id: row.id,
+            from_address: row.from_address,
+            subject: row.subject,
+            status: row.status,
+            received_at: row.received_at.to_rfc3339(),
+            category: row.category,
+            spam_verdict: row.spam_verdict,
+        })
+        .collect();
+
+    Ok(Json(EmailListResponse { items, total }))
 }
 
 async fn get_email(
-    State(_state): State<Arc<ApiState>>,
+    State(state): State<Arc<ApiState>>,
     Path(id): Path<Uuid>,
     _auth: AuthenticatedRequest,
-) -> Json<serde_json::Value> {
-    // Placeholder
-    Json(serde_json::json!({"id": id, "status": "pending"}))
+) -> Result<Json<EmailDetailResponse>, AppError> {
+    let email = email_repo::get(&state.pool, id).await?;
+    Ok(Json(detail_of(email)))
 }
 
 async fn get_thread(
-    State(_state): State<Arc<ApiState>>,
-    Path(_id): Path<Uuid>,
+    State(state): State<Arc<ApiState>>,
+    Path(id): Path<Uuid>,
     _auth: AuthenticatedRequest,
-) -> Json<ThreadResponse> {
-    Json(ThreadResponse { messages: vec![] })
+) -> Result<Json<ThreadResponse>, AppError> {
+    // The path names an email, not a thread: a caller asking for "the thread"
+    // starts from the message it already has.
+    let email = email_repo::get(&state.pool, id).await?;
+    let messages = email_repo::thread_messages(&state.pool, email.thread_id)
+        .await?
+        .into_iter()
+        .map(|message| EmailSummary {
+            id: message.id,
+            from_address: message.from_address,
+            subject: message.subject,
+            status: message.status.as_str().to_string(),
+            received_at: message.received_at.to_rfc3339(),
+            category: message.category.map(|c| c.as_str().to_string()),
+            spam_verdict: message.spam_verdict.map(|v| v.as_str().to_string()),
+        })
+        .collect();
+    Ok(Json(ThreadResponse { messages }))
+}
+
+fn detail_of(email: StoredEmail) -> EmailDetailResponse {
+    EmailDetailResponse {
+        id: email.id,
+        thread_id: email.thread_id,
+        from_address: email.from_address,
+        from_name: email.from_name,
+        to_addresses: email.to_addresses,
+        subject: email.subject,
+        status: email.status.as_str().to_string(),
+        category: email.category.map(|c| c.as_str().to_string()),
+        spam_verdict: email.spam_verdict.map(|v| v.as_str().to_string()),
+        text_body: email.text_body,
+        date: email.date.map(|d| d.to_rfc3339()),
+        received_at: email.received_at.to_rfc3339(),
+        lead_id: email.lead_id,
+    }
 }
 
 async fn reprocess_email(

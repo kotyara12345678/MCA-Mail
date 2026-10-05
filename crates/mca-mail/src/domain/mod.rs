@@ -7,13 +7,16 @@ mod class;
 mod classification;
 mod draft;
 mod email_record;
+pub(crate) mod flex;
 mod handoff;
 mod ids;
 mod lead;
+mod manager_card;
 mod message;
 mod processing;
 mod requirement;
 mod research;
+mod spam_policy;
 mod wire_enum;
 
 pub use address::{normalize_subject, EmailAddress};
@@ -38,6 +41,7 @@ pub use ids::{
 pub use lead::{
     Contact, ConversationDirection, ConversationEntry, Lead, LeadSource, LeadStatus, OutboundState,
 };
+pub use manager_card::{ManagerCard, UNKNOWN as MANAGER_CARD_UNKNOWN};
 pub use message::{
     EmailAttachment, ExtractionStatus, InboundMessage, MailboxIdentity, MessagePart,
     OutboundAttachment, OutboundMessage,
@@ -46,8 +50,12 @@ pub use processing::{
     AgentRunRecord, EmailThread, EventSeverity, ProcessingEvent, ProcessingRun, ProcessingStage,
     RunState, RunTrigger, ToolCallRecord, ToolCallStatus,
 };
-pub use requirement::{LeadRequirement, RequirementField, RequirementScope, RequirementSource};
+pub use requirement::{
+    normalize, LeadRequirement, NormalizeReport, RawRequirement, RequirementField,
+    RequirementScope, RequirementSource,
+};
 pub use research::{
     CompanyIdentifiers, CompanyResearchReport, CompanyStatus, ResearchSource, ResearchStatus,
 };
+pub use spam_policy::confident_spam;
 pub(crate) use wire_enum::wire_enum;

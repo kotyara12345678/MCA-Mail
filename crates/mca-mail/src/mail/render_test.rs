@@ -20,7 +20,7 @@ fn message() -> OutboundMessage {
 
 #[test]
 fn threading_headers_survive_rendering() {
-    let raw = String::from_utf8(rfc5322(&message(), "agent@mca.example").unwrap()).unwrap();
+    let raw = String::from_utf8(rfc5322(&message(), "agent@mca.example", "MCA").unwrap()).unwrap();
     assert!(raw.contains("In-Reply-To: <parent@example.com>"), "{raw}");
     assert!(
         raw.contains("References: <root@example.com> <parent@example.com>"),

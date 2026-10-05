@@ -28,4 +28,7 @@ fn lookup_resolves_documented_names() {
     assert_eq!(nested_target("EMAIL_MODE"), Some("security.email_mode"));
     assert_eq!(nested_target("PATH"), None);
     assert_eq!(nested_target("NOT_A_REAL_KEY"), None);
+    assert_eq!(nested_target("MAIL_MODE"), Some("mail.mode"));
+    assert_eq!(nested_target("MAIL_SPAM_FOLDER"), Some("mail.spam_folder"));
+    assert_eq!(nested_target("MAIL_SENT_FOLDER"), Some("mail.sent_folder"));
 }

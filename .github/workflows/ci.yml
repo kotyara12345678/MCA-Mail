@@ -44,6 +44,10 @@ jobs:
       - name: Unit tests
         run: cargo test --workspace --lib
 
+      # SSE and http_log contracts need no database (lazy pool, static health).
+      - name: Observability contract tests
+        run: cargo test --test sse_contract --test http_log_contract
+
       - name: Build release binary
         run: cargo build --release --package mca-mail
 

@@ -53,16 +53,14 @@ pub struct ImapSettings {
     pub tls: TlsMode,
     /// IMAP folder to read, provider specific (`INBOX`, `INBOX.MCA`).
     pub inbox: String,
-    /// Folder quarantined mail is moved to. Empty means "label only".
-    pub quarantine_folder: String,
-    /// Optional folder new outbound drafts are written to.
-    pub drafts_folder: String,
     /// Accept self-signed certificates. Development only.
     pub allow_invalid_certs: bool,
     pub connect_timeout_seconds: u64,
     pub command_timeout_seconds: u64,
     /// Use IMAP IDLE when the server advertises it.
     pub use_idle: bool,
+    /// Reconnect and re-issue schedule for the IDLE connection.
+    pub idle: IdleSettings,
     /// IMAP namespace prefix used by some webmail providers.
     pub namespace_prefix: String,
 }
@@ -74,12 +72,11 @@ impl Default for ImapSettings {
             port: 993,
             tls: TlsMode::Implicit,
             inbox: "INBOX".to_string(),
-            quarantine_folder: "MCA/Quarantine".to_string(),
-            drafts_folder: "Drafts".to_string(),
             allow_invalid_certs: false,
             connect_timeout_seconds: 20,
             command_timeout_seconds: 60,
             use_idle: false,
+            idle: IdleSettings::default(),
             namespace_prefix: String::new(),
         }
     }
@@ -111,6 +108,9 @@ impl Default for SmtpSettings {
     }
 }
 
-#[path = "mail_root.rs"]
-mod mail_root;
-pub use mail_root::MailSettings;
+#[path = "mail/idle.rs"]
+mod idle;
+#[path = "mail/root.rs"]
+mod root;
+pub use idle::IdleSettings;
+pub use root::MailSettings;

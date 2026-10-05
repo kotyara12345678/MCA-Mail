@@ -102,6 +102,31 @@ impl Default for AttachmentPolicy {
     }
 }
 
+/// Who receives the manager card and whether it may be sent at all.
+///
+/// The address is configuration, not code: hard-coding a person's mailbox into
+/// the business logic would make the wrong recipient a source change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ManagerCardSettings {
+    /// Off by default: a pilot first proves the card on screen, then turns on
+    /// delivery.
+    pub enabled: bool,
+    pub recipient: String,
+    /// Ceiling per hour, independent of the customer-reply quota.
+    pub max_per_hour: u32,
+}
+
+impl Default for ManagerCardSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            recipient: String::new(),
+            max_per_hour: 5,
+        }
+    }
+}
+
 /// Inbound size guards, applied before anything is stored or sent to an LLM.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

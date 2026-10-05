@@ -17,7 +17,7 @@ use tower::ServiceExt;
 
 use mca_mail::api::{self, ApiState};
 use mca_mail::config::{ApiSettings, DatabaseSettings};
-use mca_mail::persistence::{api_key_repo, pool};
+use mca_mail::persistence::api_key_repo;
 
 async fn test_pool() -> Option<PgPool> {
     let url = std::env::var("MCA_TEST_DATABASE_URL").ok()?;
@@ -41,7 +41,7 @@ async fn test_pool() -> Option<PgPool> {
 }
 
 async fn app(pg: PgPool) -> axum::Router {
-    let state = Arc::new(ApiState::new(pg.clone(), pool::health(&pg).await));
+    let state = Arc::new(ApiState::new(pg.clone()));
     api::build_router(&ApiSettings::default(), state)
 }
 
@@ -74,6 +74,27 @@ async fn health_endpoints_are_public() {
         StatusCode::OK
     );
     assert_eq!(call(app, "GET", "/ready", None).await, StatusCode::OK);
+}
+
+/// Liveness and readiness must diverge when the database is gone: `/health`
+/// keeps answering 200 because the process is still serving, while `/ready`
+/// returns 503 — which is what `mca-mail healthcheck` probes, and therefore
+/// what flips the container unhealthy in `docker compose ps`. Needs no
+/// database of its own: the pool points somewhere nothing listens.
+#[tokio::test]
+async fn readiness_reports_a_dead_database_but_liveness_does_not() {
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .connect_lazy("postgres://mca:mca@127.0.0.1:55432/mca_mail_ci7")
+        .expect("lazy pool");
+    let app = api::build_router(&ApiSettings::default(), Arc::new(ApiState::new(pool)));
+    assert_eq!(
+        call(app.clone(), "GET", "/health", None).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(app, "GET", "/ready", None).await,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
 }
 
 #[tokio::test]

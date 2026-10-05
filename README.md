@@ -14,6 +14,11 @@ MCA Mail is an autonomous AI system that connects to corporate email, analyses i
 - **Professional communication** — drafts replies in the client's language
 - **Manager handoff** — structured lead packages with full conversation context
 - **Multi-level safety** — `dry_run` → `review` → `auto` modes
+- **Read-only mailbox mode** — `MAIL_MODE=read_only` (the default) reads mail and
+  writes our own records while refusing every mailbox mutation
+- **Automatic backups** — scheduled `pg_dump` with validation and retention
+- **Instant new-mail detection** — optional IMAP IDLE with a jittered reconnect
+  backoff and a fallback poller (`MAIL_IDLE=false` by default)
 
 ### Architecture
 
@@ -64,6 +69,62 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --workspace
 MCA_TEST_DATABASE_URL=postgres://user:pass@host:5432/db cargo test
 ```
+
+### Mailbox access mode
+
+`MAIL_MODE` controls what the agent may do to the **customer's mailbox**. It is
+independent of `EMAIL_MODE`, which controls outbound sending.
+
+| `MAIL_MODE` | Reads mail | Writes our database | Mutates the mailbox |
+|-------------|-----------|--------------------|---------------------|
+| `read_only` (default) | yes | yes | never |
+| `read_write` | yes | yes | safe MOVE/COPY/flags only |
+
+`read_only` allows everything that touches our own PostgreSQL — leads, drafts,
+classification, history — and refuses every server-side change: SMTP send,
+IMAP APPEND, MOVE, COPY, DELETE, archive, flag and label changes. Refusals
+happen before any network call and are logged with the mode and operation only;
+message content and credentials never appear. Because nothing is flagged,
+messages are re-read on the next poll and the database dedup key keeps
+processing idempotent.
+
+An unrecognised `MAIL_MODE` stops startup. Legacy `work` parses as
+`read_write`; neither mode enables SMTP sending, APPEND, `\\Deleted`, or EXPUNGE.
+SMTP remains separately gated by `EMAIL_MODE`/`EMAIL_AUTO_SEND`.
+
+### Backups
+
+Backups run regardless of `MAIL_MODE`. Read-only protects the customer's
+mailbox; it does not protect our records, which are the only account of the work.
+
+```bash
+BACKUP_ENABLED=true
+BACKUP_DIR=/app/backups
+BACKUP_INTERVAL_HOURS=6
+BACKUP_RETENTION_DAYS=7
+BACKUP_RETENTION_WEEKS=4
+BACKUP_MAX_SIZE_MB=1024
+```
+
+Each run writes `pg_dump --format=custom` to a `.partial` file, validates it
+with `pg_restore --list`, and only then renames it into place, so a partial
+file is never mistaken for a backup. The database password is passed through a
+temporary `.pgpass` rather than the command line, and each run has a timeout.
+
+Rotating keeps the newest backup no matter what, and only deletes files it
+recognises: one newest copy for each of the last seven UTC dates, then up to
+four weekly copies. Symlinks and unrelated files are never followed or removed;
+temporary files are not counted as completed backups.
+
+For safe validation and step-by-step restore instructions, see
+[docs/BACKUPS.md](docs/BACKUPS.md). Production restore is manual and must be
+performed only after stopping the application and taking a separate copy of
+the current database.
+
+The Docker `backups` volume survives container replacement, but not loss of the
+VPS or `docker compose down -v`. It is not encrypted; restrict host/volume
+access and plan an encrypted off-server copy before relying on disaster
+recovery.
 
 ### Configuration Parameters Required from System Admin
 

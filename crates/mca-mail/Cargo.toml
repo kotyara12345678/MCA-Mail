@@ -60,3 +60,6 @@ zeroize.workspace = true
 
 [dev-dependencies]
 http-body-util.workspace = true
+# `test-util` is what makes `#[tokio::test(start_paused = true)]` work, so the
+# backoff and timeout tests can assert on virtual time instead of sleeping.
+tokio = { workspace = true, features = ["test-util"] }

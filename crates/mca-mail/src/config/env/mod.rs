@@ -5,6 +5,7 @@
 //! deployment contract, so the mapping is declared explicitly instead of being
 //! inferred from a prefix rule. Adding a setting means adding one row.
 
+mod backup;
 mod database;
 mod llm;
 mod mail;
@@ -20,6 +21,7 @@ pub const TABLES: &[&[(&str, &str)]] = &[
     process::APP,
     database::DATABASE,
     mail::MAIL,
+    backup::BACKUP,
     llm::LLM,
     process::AGENTS,
     process::SECURITY,

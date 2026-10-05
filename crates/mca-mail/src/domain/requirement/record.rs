@@ -21,6 +21,9 @@ pub struct LeadRequirement {
     pub unit: Option<String>,
     /// `null` for `not_applicable` and `unknown` entries.
     pub confidence: Option<f32>,
+    /// Verbatim span from the customer's own words that justifies the value.
+    /// Kept so a manager can audit what the model read.
+    pub evidence: Option<String>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -42,6 +45,7 @@ impl LeadRequirement {
             source: RequirementSource::AiInference,
             unit: None,
             confidence: None,
+            evidence: None,
             updated_at: chrono::Utc::now(),
         }
     }
@@ -65,6 +69,22 @@ impl LeadRequirement {
             source: RequirementSource::Customer,
             confidence: Some(1.0),
             ..Self::empty(lead_id, field)
+        }
+    }
+}
+
+impl LeadRequirement {
+    /// Ranking used when the same field arrives twice in one batch: a fact the
+    /// customer stated beats an inference, which beats "does not apply", which
+    /// beats "we do not know".
+    pub(crate) fn precedence(&self) -> u8 {
+        match (self.state, self.source) {
+            (FieldState::Known, RequirementSource::Manager) => 5,
+            (FieldState::Known, RequirementSource::Customer) => 4,
+            (FieldState::Known, _) => 3,
+            (FieldState::NeedsConfirmation, _) => 2,
+            (FieldState::NotApplicable, _) => 1,
+            (FieldState::Unknown, _) => 0,
         }
     }
 }

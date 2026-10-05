@@ -15,6 +15,8 @@ crate::domain::wire_enum! {
         Internal => "internal",
         Advertisement => "advertisement",
         Spam => "spam",
+        BusinessInquiry => "business_inquiry",
+        Other => "other",
         Uncertain => "uncertain",
     }
 }
@@ -30,23 +32,42 @@ impl EmailCategory {
                 | EmailCategory::FullImportRequest
                 | EmailCategory::CustomsRequest
                 | EmailCategory::ProcurementRequest
+                | EmailCategory::BusinessInquiry
         )
     }
 
     /// Categories that must never receive an automated reply.
+    ///
+    /// `Other` sits here deliberately: it is the model's way of saying "this
+    /// does not fit any business shape", and answering an email nobody
+    /// understood is worse than leaving it for a person.
     pub const fn allows_reply(&self) -> bool {
         !matches!(
             self,
             EmailCategory::Spam
                 | EmailCategory::Advertisement
                 | EmailCategory::Internal
+                | EmailCategory::Other
                 | EmailCategory::Uncertain
         )
     }
 
     /// Categories routed to a human without attempting automation.
     pub const fn requires_human(&self) -> bool {
-        matches!(self, EmailCategory::Complaint)
+        matches!(self, EmailCategory::Complaint | EmailCategory::Other)
+    }
+
+    /// Whether a lead may be created for this category at all.
+    ///
+    /// A lead is a commercial record; creating one for spam, internal traffic,
+    /// an unrecognised message or an unclassified one would pollute the
+    /// pipeline the manager reads.
+    pub const fn allows_lead(&self) -> bool {
+        self.is_demand()
+            || matches!(
+                self,
+                EmailCategory::DocumentRequest | EmailCategory::Partner | EmailCategory::Complaint
+            )
     }
 }
 

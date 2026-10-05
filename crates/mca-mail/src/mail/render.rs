@@ -58,8 +58,15 @@ pub fn build(
 }
 
 /// Render to bytes for IMAP `APPEND`, with a size guard.
-pub fn rfc5322(message: &OutboundMessage, from_address: &str) -> Result<Vec<u8>, MailError> {
-    let rendered = build(message, from_address, "MCA Logistics")?;
+///
+/// Takes the same sender identity SMTP uses, so the copy that lands in the
+/// sent folder is the message that left, not a near-miss of it.
+pub fn rfc5322(
+    message: &OutboundMessage,
+    from_address: &str,
+    from_name: &str,
+) -> Result<Vec<u8>, MailError> {
+    let rendered = build(message, from_address, from_name)?;
     let bytes = rendered.formatted();
     if bytes.len() > MAX_OUTBOUND_BYTES {
         return Err(MailError::TooLarge(format!(

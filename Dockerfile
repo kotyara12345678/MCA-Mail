@@ -15,8 +15,22 @@ COPY . .
 RUN cargo build --release --package mca-mail
 
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update -qq && apt-get install -y -qq ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+# postgresql-client supplies pg_dump and pg_restore, which the backup worker
+# shells out to. Without them BACKUP_ENABLED=true would fail every run, so the
+# dependency is part of the image rather than a prerequisite the operator has
+# to discover after losing a disk.
+RUN apt-get update -qq && apt-get install -y -qq ca-certificates curl gnupg libssl3
+RUN install -d /usr/share/postgresql-common/pgdg && \
+		curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc | \
+			gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg && \
+		echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+			> /etc/apt/sources.list.d/pgdg.list && \
+		apt-get update -qq && apt-get install -y -qq postgresql-client-16 && \
+		rm -rf /var/lib/apt/lists/*
 RUN groupadd -r mca && useradd -r -g mca -m -d /app mca
+# Created up front and owned by the runtime user: pg_dump runs as `mca`, so a
+# root-owned mount would fail every backup.
+RUN mkdir -p /app/backups && chown mca:mca /app/backups
 USER mca
 WORKDIR /app
 COPY --from=builder /app/target/release/mca-mail /app/mca-mail

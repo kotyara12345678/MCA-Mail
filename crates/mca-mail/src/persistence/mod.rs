@@ -4,6 +4,7 @@
 pub mod api_key_repo;
 pub mod audit_repo;
 pub mod conversation_repo;
+pub mod cursor_repo;
 pub mod draft_repo;
 pub mod email_repo;
 pub mod event_repo;

@@ -18,6 +18,7 @@ mod capture;
 pub mod errors;
 pub mod format;
 pub mod http;
+pub mod idle;
 pub mod lifecycle;
 pub mod llm;
 pub mod queue;

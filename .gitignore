@@ -7,7 +7,16 @@
 /config/production.toml
 *.pem
 *.key
+# Written by the backup worker to hand the database password to pg_dump without
+# putting it in the process arguments. Never commit one.
 .pgpass
+/backups/
+*.dump
+*.dump.partial
 .DS_Store
 Thumbs.db
 docs/_build
+# Local scratch: a tool's per-project state file, and captured run output.
+# The IMAP smoke logs contain real mailbox content, so they never belong here.
+/.freebuff/
+/logs/

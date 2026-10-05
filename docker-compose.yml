@@ -1,12 +1,27 @@
+# Production stack: PostgreSQL + the MCA Mail gateway.
+#
+# `environment` beats `env_file`, so the keys set below always win over `.env`.
+# `.env` is docker-ignored and holds only the secrets (IMAP/SMTP/LLM) — nothing
+# in it is baked into the image.
+#
+# Both published ports bind to 127.0.0.1. Nothing here speaks TLS, so nothing
+# is meant to be reached from the network directly: reach the API through an
+# SSH tunnel (`ssh -L 8080:127.0.0.1:8080 <vps>`) or put a reverse proxy with
+# certificates in front of it. Change the left-hand side of a mapping only if
+# you have done one of those two things first. PostgreSQL never needs to be
+# reachable from outside this host.
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: mca
-      POSTGRES_PASSWORD: mca
+      # Overridable per environment; the default keeps a fresh clone working.
+      # DATABASE_URL below reads the same variable, so the two cannot drift.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mca}
       POSTGRES_DB: mca_mail
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,21 +29,73 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    logging: &log-rotation
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   mca-mail:
     build: .
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
       APP_ENV: production
-      DATABASE_URL: postgres://mca:mca@postgres:5432/mca_mail
-      MAIL_PROVIDER: mock
-      LLM_PROVIDER: mock
-      EMAIL_MODE: dry_run
+      DATABASE_URL: postgres://mca:${POSTGRES_PASSWORD:-mca}@postgres:5432/mca_mail
+      # Gate 1 — the transport: without `read_write` every mutation is refused
+      # by the IMAP guard before it reaches the server.
+      MAIL_MODE: read_write
+      # Gate 2 — the outbound policy: only `auto` allows mailbox mutation
+      # (labels/folders/flags) and only with `EMAIL_AUTO_SEND=true` does a
+      # reply leave the outbox. Together with EMAIL_MODE=auto this is the
+      # production auto-responder: pipeline decides, outbox paces, SMTP sends.
+      EMAIL_MODE: auto
+      EMAIL_AUTO_SEND: "true"
+      # Gate 3 — the manager card. One card per qualified lead, delivered to
+      # the same outbox (and therefore the same rate limiter) as replies.
+      # The recipient lives in `.env`, not here: it is customer data, and an
+      # empty value silently skips the card instead of failing.
+      SEND_MANAGER_CARD: "true"
+      MANAGER_CARD_RECIPIENT: ${MANAGER_CARD_RECIPIENT:-}
+      # Where convicted spam is moved, by the exact name the server lists it.
+      # This server advertises no SPECIAL-USE flags, so the Spam role cannot be
+      # resolved and the name is required for the move to succeed.
+      MAIL_SPAM_FOLDER: Junk
+      # Where a delivered message is APPENDed after SMTP hands it over, so the
+      # reply is also visible under "Отправленные" and not only on the wire.
+      # Same reason as the spam folder: this server advertises no SPECIAL-USE
+      # flags, so the \Sent role cannot be resolved and the name is required.
+      # The server lists both `Sent` and `INBOX_Sent`; say so here if the
+      # client reads the other one.
+      MAIL_SENT_FOLDER: Sent
+      # Pick a test message up promptly instead of waiting out the 5-minute
+      # default in .env.
+      MAIL_POLL_INTERVAL_SECONDS: "30"
+      BACKUP_ENABLED: "true"
+      BACKUP_DIR: /app/backups
+      BACKUP_INTERVAL_HOURS: "6"
+      BACKUP_RETENTION_DAYS: "7"
+      BACKUP_RETENTION_WEEKS: "4"
+      BACKUP_MAX_SIZE_MB: "1024"
+    volumes:
+      # A named volume, not a path inside the container: without this the
+      # backups die with `docker compose down`. Copy them out before removing
+      # the volume — see the restore notes in README.md.
+      - backups:/app/backups
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
+    # The app stops accepting connections, drains open requests, then waits for
+    # its workers (outbox delivery, backup dump). Its own internal deadlines
+    # are 8s + 15s; give the process the slack to reach them before Docker
+    # escalates to SIGKILL, which would truncate a dump or drop a draft.
+    stop_grace_period: 30s
+    logging: *log-rotation
 
 volumes:
   pgdata:
+  backups:

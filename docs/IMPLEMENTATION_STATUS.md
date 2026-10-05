@@ -4,6 +4,18 @@ _Last updated: 2026-10-01_
 
 ## Completed
 
+### Mail Safety & PostgreSQL Backups (2026-10-02)
+- Typed `MAIL_MODE=read_only|read_write`; absent mode defaults to read-only and
+  unrecognised values fail configuration loading.
+- Mailbox mutations are guarded in the transport before SMTP/IMAP calls;
+  read-only still permits ingestion and writes to MCA Mail's own PostgreSQL.
+- Scheduled PostgreSQL custom-format backups are started independently of
+  mail-provider startup and journal sanitized outcomes.
+- Dumps are written as partial files, checked with `pg_restore --list`,
+  atomically published, and rotated to one point per UTC day plus weekly points.
+- Docker persists backups in a separate named volume; restore steps and
+  encryption/off-server limitations are documented in `docs/BACKUPS.md`.
+
 ### Phase 1 — Foundation ✅
 - Rust workspace (mca-mail + mca-mail-testkit)
 - Layered config: defaults → TOML → flat env, with `#[serde(default)]` merge
@@ -48,17 +60,36 @@ _Last updated: 2026-10-01_
   (the Docker HEALTHCHECK), `mca-mail help` — raw key printed once
 
 ### Phase 7 — Testing ✅ (unit) / ✅ (integration/e2e)
-- 107 tests passing (83 unit + 15 persistence + 6 API auth + 3 e2e);
-  clippy clean; fmt clean
+- 126 tests passing (98 unit + 15 persistence + 6 API auth + 3 e2e +
+  2 http_log + 2 SSE); clippy clean; fmt clean
 - `persistence_contract`, `api_contract`, `e2e_contract` all embed and apply
-  the migrations (need `MCA_TEST_DATABASE_URL`)
+  the migrations (need `MCA_TEST_DATABASE_URL`); `sse_contract` and
+  `http_log_contract` run without a database (lazy pool)
 - Manual E2E against mock corpus + real LLM: 10 fixtures processed,
   categories/spam-verdicts/leads correctly persisted
 
 ### Phase 8 — Docs ✅
 - README, ARCHITECTURE, SETUP, API, AGENTS, SECURITY, DEPLOYMENT,
-  EMAIL_INTEGRATION, IMPLEMENTATION_PLAN
+  EMAIL_INTEGRATION, IMPLEMENTATION_PLAN, OBSERVABILITY
 - `.env.example`, Dockerfile, docker-compose(.dev), CI/CD workflows
+
+### Phase 9 — Observability ✅ (2026-10-01)
+- Structured events for the whole lifecycle (target `mca::obs`): email
+  lifecycle, queue/poll/batch/worker, agents, LLM usage & retries, tools,
+  artifacts (draft/handoff/move/label), DB/migrations/transactions,
+  restart recovery, HTTP requests — 37 event names, all correlated by
+  `email_id` + `processing_id` (`proc_{run_id}`)
+- Terminal: pretty formatter (level padded, event name first) or
+  `LOG_FORMAT=json`; level via `LOG_LEVEL` (fallback) / `RUST_LOG` (wins)
+- Live SSE: `GET /api/events/stream` (broadcast bus, lazily serialised,
+  512-event buffer, lag-tolerant) + `GET /events` HTML dashboard; both
+  exempt from the 30s request timeout
+- HTTP middleware `api/http_log`: `x-request-id` in/out, 30s timeout,
+  `http_request`/`http_request_failure` with the matched route pattern
+- API surface split for the 100-line rule: orchestration (7 files),
+  workers (poll/queue/recovery), observability helpers per group
+- Prompts, LLM responses, secrets and email bodies are never logged;
+  errors clipped to 300 chars
 
 ## Verified End-to-End (2026-10-01)
 
@@ -80,6 +111,7 @@ Fresh `mca_mail_dev`, mock mail provider (10 fixtures) + real Polza AI LLM:
 ## CI/CD (2026-10-01)
 
 - `.github/workflows/ci.yml`: fmt → clippy (-D warnings) → unit tests →
+  observability contracts (`sse_contract` + `http_log_contract`, DB-free) →
   release build; integration job with a PostgreSQL service runs
   `persistence_contract` + `e2e_contract` + `api_contract` (all embed and
   apply the migrations — no sqlx-cli install); separate Docker image build
@@ -110,6 +142,9 @@ With mock mail provider + real Polza AI LLM:
 2. Real IMAP/SMTP pilot after sysadmin provides credentials
 3. Company research provider (approved registry integration)
 4. Graceful-shutdown test, retention job e2e check
+5. Tool loop: `ToolRegistry::execute` is intentionally not wired into the
+   pipeline yet — deferred (see Decisions Log). No agent currently emits a
+   tool call the loop would have to run.
 
 ## Decisions Log
 

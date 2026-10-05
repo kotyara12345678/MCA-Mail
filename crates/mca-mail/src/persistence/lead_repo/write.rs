@@ -106,14 +106,26 @@ pub async fn update_summary(
     unresolved: &[String],
     confidence: f32,
 ) -> Result<(), AppError> {
+    // Both columns are `jsonb`; binding `&[String]` would be sent as `text[]`
+    // and PostgreSQL would reject the assignment instead of coercing it.
     sqlx::query(
         "UPDATE leads SET summary = $2, open_questions = $3, unresolved_topics = $4, \
          confidence = $5, last_activity_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(summary)
-    .bind(questions)
-    .bind(unresolved)
+    .bind(serde_json::Value::Array(
+        questions
+            .iter()
+            .map(|q| serde_json::Value::String(q.clone()))
+            .collect(),
+    ))
+    .bind(serde_json::Value::Array(
+        unresolved
+            .iter()
+            .map(|q| serde_json::Value::String(q.clone()))
+            .collect(),
+    ))
     .bind(confidence)
     .execute(pool)
     .await?;

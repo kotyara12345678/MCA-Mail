@@ -13,6 +13,7 @@ pub struct OrchestratorBuilder {
     pool: Option<sqlx::PgPool>,
     tools: Option<ToolRegistry>,
     llm: Option<Arc<dyn LlmProvider>>,
+    mailbox: Option<Arc<dyn crate::mail::MaybeWritable>>,
 }
 
 impl OrchestratorBuilder {
@@ -22,6 +23,7 @@ impl OrchestratorBuilder {
             pool: None,
             tools: None,
             llm: None,
+            mailbox: None,
         }
     }
 
@@ -41,6 +43,11 @@ impl OrchestratorBuilder {
         self.llm = Some(llm);
         self
     }
+    /// Optional, so a test can observe mutations on a mock transport.
+    pub fn mailbox(mut self, mailbox: Option<Arc<dyn crate::mail::MaybeWritable>>) -> Self {
+        self.mailbox = mailbox;
+        self
+    }
 
     pub fn build(self) -> Result<Orchestrator, AppError> {
         let config = self
@@ -53,7 +60,7 @@ impl OrchestratorBuilder {
         let llm = self
             .llm
             .unwrap_or_else(|| Arc::new(crate::llm::mock::MockLlmProvider::new(&config.llm)));
-        Ok(Orchestrator::new(llm, tools, &config, pool))
+        Ok(Orchestrator::new(llm, tools, &config, pool, self.mailbox))
     }
 }
 

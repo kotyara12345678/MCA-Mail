@@ -3,10 +3,12 @@
 //! Requires `MCA_TEST_DATABASE_URL` (PostgreSQL). No real mail, no paid LLM:
 //! the mock mail provider and mock LLM make every run reproducible.
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mca_mail::config::AppConfig;
 use mca_mail::llm::mock::MockLlmProvider;
+use mca_mail::mail::MockMailProvider;
 use mca_mail::orchestration::{Orchestrator, OrchestratorBuilder};
 use mca_mail::persistence::{email_repo, thread_repo};
 use mca_mail::tools::ToolRegistry;
@@ -55,13 +57,25 @@ fn build_orchestrator(
     pool: sqlx::PgPool,
     llm: Arc<dyn mca_mail::llm::LlmProvider>,
 ) -> Arc<Orchestrator> {
+    build_orchestrator_with(test_config(), pool, llm, None)
+}
+
+/// `mailbox` is separate from the config because it is the only dependency a
+/// test cannot express through settings: the handle is built once at boot.
+fn build_orchestrator_with(
+    config: AppConfig,
+    pool: sqlx::PgPool,
+    llm: Arc<dyn mca_mail::llm::LlmProvider>,
+    mailbox: Option<Arc<dyn mca_mail::mail::MaybeWritable>>,
+) -> Arc<Orchestrator> {
     let tools = ToolRegistry::new();
     Arc::new(
         OrchestratorBuilder::new()
-            .config(test_config())
+            .config(config)
             .pool(pool)
             .tools(tools)
             .llm(llm)
+            .mailbox(mailbox)
             .build()
             .expect("build orchestrator"),
     )
@@ -73,7 +87,7 @@ async fn ingest(pool: &sqlx::PgPool, message: &InboundMessage) -> mca_mail::doma
     let thread = thread_repo::ensure_thread(pool, &key, &normalized, None)
         .await
         .expect("thread");
-    let outcome = email_repo::insert_inbound(pool, thread, "test", message)
+    let outcome = email_repo::insert_inbound(pool, thread, "test", message, None)
         .await
         .expect("insert");
     outcome.email_id()
@@ -104,9 +118,32 @@ async fn spam_email_is_quarantined_not_deleted() {
     let pool = setup_db().await;
     let llm = Arc::new(MockLlmProvider::new(&mock_llm_settings()));
     llm.stub_json("Скидка", &replies::spam());
-    let orch = build_orchestrator(pool.clone(), llm as Arc<dyn mca_mail::llm::LlmProvider>);
+
+    // Moving a message out of the inbox is gated twice over: `MailMode` inside
+    // the transport guard and `EMAIL_MODE=auto` in the policy. Both have to be
+    // open or the message stays where it is, which is exactly what this test
+    // would otherwise fail to notice.
+    let mut config = test_config();
+    config.security.email_mode = mca_mail::config::EmailMode::Auto;
+    let mailbox = Arc::new(MockMailProvider::with_mode(
+        mca_mail::config::MailMode::ReadWrite,
+    ));
+    let log = mailbox.mutation_log();
+    let orch = build_orchestrator_with(
+        config,
+        pool.clone(),
+        llm as Arc<dyn mca_mail::llm::LlmProvider>,
+        Some(mailbox),
+    );
 
     let id = ingest(&pool, &email("Скидка 70%", "Купите наши услуги")).await;
+    // The UID is stamped by the poller in production; stamp it here so the
+    // move has a destination the server would recognise.
+    sqlx::query("UPDATE emails SET provider_uid = '91' WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .expect("stamp the server uid");
     orch.process_email(id).await.expect("process");
 
     let stored = email_repo::get(&pool, id).await.expect("get");
@@ -114,6 +151,11 @@ async fn spam_email_is_quarantined_not_deleted() {
     assert_eq!(
         stored.spam_verdict,
         Some(mca_mail::domain::SpamVerdict::Spam)
+    );
+    assert_eq!(
+        log.quarantine.load(Ordering::SeqCst),
+        1,
+        "the message must be moved out of the inbox, not only flagged"
     );
 }
 

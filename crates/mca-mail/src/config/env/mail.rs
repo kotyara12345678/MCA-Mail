@@ -1,6 +1,7 @@
 //! IMAP and SMTP transport variables.
 
 pub const MAIL: &[(&str, &str)] = &[
+    ("MAIL_MODE", "mail.mode"),
     ("MAIL_PROVIDER", "mail.provider"),
     ("MAIL_USERNAME", "mail.username"),
     ("MAIL_PASSWORD", "mail.password"),
@@ -14,10 +15,24 @@ pub const MAIL: &[(&str, &str)] = &[
     ("MAIL_IMAP_PORT", "mail.imap.port"),
     ("MAIL_IMAP_TLS", "mail.imap.tls"),
     ("MAIL_INBOX", "mail.imap.inbox"),
-    ("MAIL_QUARANTINE_FOLDER", "mail.imap.quarantine_folder"),
-    ("MAIL_DRAFTS_FOLDER", "mail.imap.drafts_folder"),
+    ("MAIL_SPAM_FOLDER", "mail.spam_folder"),
+    ("MAIL_SENT_FOLDER", "mail.sent_folder"),
     ("MAIL_ALLOW_INVALID_CERTS", "mail.imap.allow_invalid_certs"),
     ("MAIL_IDLE", "mail.imap.use_idle"),
+    ("MAIL_IDLE_WAIT_SECONDS", "mail.imap.idle.wait_seconds"),
+    (
+        "MAIL_IDLE_BACKOFF_MIN_SECONDS",
+        "mail.imap.idle.reconnect_min_seconds",
+    ),
+    (
+        "MAIL_IDLE_BACKOFF_MAX_SECONDS",
+        "mail.imap.idle.reconnect_max_seconds",
+    ),
+    ("MAIL_IDLE_JITTER_PERCENT", "mail.imap.idle.jitter_percent"),
+    (
+        "MAIL_IDLE_FALLBACK_POLL_SECONDS",
+        "mail.idle_fallback_poll_seconds",
+    ),
     ("MAIL_NAMESPACE_PREFIX", "mail.imap.namespace_prefix"),
     ("MAIL_SMTP_HOST", "mail.smtp.host"),
     ("MAIL_SMTP_PORT", "mail.smtp.port"),

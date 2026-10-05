@@ -12,7 +12,9 @@ use crate::orchestration::AgentContext;
 pub struct SpamOutput {
     pub verdict: SpamVerdict,
     pub confidence: f32,
+    #[serde(deserialize_with = "crate::domain::flex::string")]
     pub explanation: String,
+    #[serde(default, deserialize_with = "crate::domain::flex::string_list")]
     pub markers: Vec<String>,
 }
 
@@ -66,9 +68,5 @@ impl Agent for SpamAgent {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}... [truncated {} chars]", &s[..max], s.len() - max)
-    }
+    super::prompt::truncate_for_prompt(s, max)
 }

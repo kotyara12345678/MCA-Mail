@@ -1,6 +1,6 @@
 //! SSE contract: `GET /api/events/stream` and the `/events` viewer page.
 //!
-//! No database needed — the pool is lazy and the health state is static.
+//! No database needed — the pool is lazy and never answers a query.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,21 +13,12 @@ use tracing_subscriber::prelude::*;
 
 use mca_mail::api::{self, ApiState};
 use mca_mail::config::ApiSettings;
-use mca_mail::persistence::pool;
 
 fn app() -> axum::Router {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .connect_lazy("postgres://mca:mca@127.0.0.1:55432/mca_mail_ci7")
         .expect("lazy pool");
-    let health = pool::Health {
-        reachable: false,
-        latency_ms: 0,
-        detail: None,
-    };
-    api::build_router(
-        &ApiSettings::default(),
-        Arc::new(ApiState::new(pool, health)),
-    )
+    api::build_router(&ApiSettings::default(), Arc::new(ApiState::new(pool)))
 }
 
 async fn get(app: axum::Router, uri: &str) -> axum::response::Response {

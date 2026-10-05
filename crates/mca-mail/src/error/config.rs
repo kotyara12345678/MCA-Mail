@@ -10,6 +10,8 @@ pub enum ConfigError {
     Invalid { field: String, reason: String },
     #[error("could not load configuration: {0}")]
     Load(String),
+    #[error("could not read .env: {0}")]
+    EnvFile(String),
     #[error("unsafe configuration in {mode} mode: {reason}")]
     Unsafe { mode: String, reason: String },
 }
@@ -21,6 +23,7 @@ impl ConfigError {
             ConfigError::Missing(f) => f.clone(),
             ConfigError::Invalid { field, .. } => field.clone(),
             ConfigError::Load(f) => f.clone(),
+            ConfigError::EnvFile(_) => ".env".to_string(),
             ConfigError::Unsafe { mode, .. } => mode.clone(),
         }
     }

@@ -92,7 +92,7 @@ async fn insert_email(pool: &PgPool, msg: &InboundMessage) -> (uuid::Uuid, uuid:
     )
     .await
     .expect("thread");
-    let outcome = persistence::email_repo::insert_inbound(pool, thread_id, "INBOX", msg)
+    let outcome = persistence::email_repo::insert_inbound(pool, thread_id, "INBOX", msg, None)
         .await
         .expect("insert email");
     (thread_id, outcome.email_id())
@@ -111,7 +111,7 @@ async fn duplicate_inbound_is_idempotent() {
     );
 
     let total: i64 = sqlx::query_scalar("SELECT count(*) FROM emails WHERE dedup_key = $1")
-        .bind(persistence::email_repo::dedup_key_for(&msg))
+        .bind(persistence::email_repo::scoped_dedup_key_for("INBOX", &msg))
         .fetch_one(&pool)
         .await
         .expect("count");
@@ -266,6 +266,87 @@ async fn only_one_live_draft_per_lead() {
         .await
         .expect("live draft")
         .is_some());
+}
+
+/// A reply that actually left must stop being the lead's live draft.
+///
+/// Auto-send has no reviewer to flip the status, so a row left at
+/// `pending_approval` keeps winning `live_draft_for_lead`: the lead's next
+/// reply is handed the old id, and with it the old conversation and outbox
+/// keys — so nothing new is ever queued. Closing the draft at delivery is
+/// what keeps the dialogue going.
+#[tokio::test]
+async fn a_delivered_reply_frees_the_lead_for_the_next_one() {
+    let Some(pool) = pool().await else { return };
+    let (lead_id, _created) = persistence::lead_repo::ensure(
+        &pool,
+        &format!("delivered-probe-{}", uuid::Uuid::new_v4()),
+        "delivered@example.com",
+        None,
+        None,
+        mca_mail::domain::RequirementScope::Transport,
+    )
+    .await
+    .expect("lead");
+
+    let draft = mca_mail::domain::EmailDraft {
+        id: uuid::Uuid::new_v4(),
+        lead_id: Some(lead_id),
+        email_id: None,
+        in_reply_to: None,
+        to_addresses: vec!["customer@example.com".into()],
+        cc_addresses: vec![],
+        subject: "Re: first".into(),
+        body: "body".into(),
+        status: mca_mail::domain::DraftStatus::PendingApproval,
+        idempotency_key: format!("draft-key-{}", uuid::Uuid::new_v4()),
+        suppression_reason: None,
+        reviewed_by: None,
+        reviewed_at: None,
+        sent_at: None,
+        provider_message_id: None,
+        created_at: chrono::Utc::now(),
+    };
+    let (first_id, created) = persistence::draft_repo::create(&pool, &draft)
+        .await
+        .expect("first draft");
+    assert!(created, "the first draft is new");
+    assert!(persistence::draft_repo::live_draft_for_lead(&pool, lead_id)
+        .await
+        .expect("live draft")
+        .is_some());
+
+    // This is what the send worker does once the message is gone: read the
+    // draft back out of the outbox key and close it.
+    let outbound_key = persistence::draft_repo::outbound_key(first_id);
+    let draft_id = persistence::draft_repo::draft_id_from_outbound_key(&outbound_key)
+        .expect("an outbound key carries its draft id");
+    assert_eq!(draft_id, first_id);
+    persistence::draft_repo::mark_sent(&pool, draft_id, "smtp-message-42")
+        .await
+        .expect("close the delivered draft");
+
+    assert!(
+        persistence::draft_repo::live_draft_for_lead(&pool, lead_id)
+            .await
+            .expect("live draft")
+            .is_none(),
+        "a delivered reply must not stay live"
+    );
+
+    let second = mca_mail::domain::EmailDraft {
+        idempotency_key: format!("draft-key-{}", uuid::Uuid::new_v4()),
+        subject: "Re: second".into(),
+        ..draft
+    };
+    let (second_id, created_second) = persistence::draft_repo::create(&pool, &second)
+        .await
+        .expect("second draft");
+    assert!(
+        created_second,
+        "the next reply must get a draft of its own, not the delivered one"
+    );
+    assert_ne!(first_id, second_id);
 }
 
 /// A lead with a handoff is automation-locked, and an unknown lead locks too.

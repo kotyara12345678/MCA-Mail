@@ -54,6 +54,12 @@ pub const SECURITY: &[(&str, &str)] = &[
         "security.outbound.max_consecutive_replies",
     ),
     ("EMAIL_MAX_BODY_CHARS", "security.outbound.max_body_chars"),
+    ("SEND_MANAGER_CARD", "security.manager_card.enabled"),
+    ("MANAGER_CARD_RECIPIENT", "security.manager_card.recipient"),
+    (
+        "MANAGER_CARD_MAX_PER_HOUR",
+        "security.manager_card.max_per_hour",
+    ),
     (
         "EMAIL_ALLOW_OUTBOUND_ATTACHMENTS",
         "security.attachments.allow_outbound_attachments",

@@ -84,6 +84,10 @@ pub struct CommunicationPlan {
     pub body: String,
     /// `draft` keeps the message for a human; `send` requests dispatch.
     pub disposition: ReplyDisposition,
+    /// Questions the body puts to the customer. Declared separately from the
+    /// prose so the server can drop a question the customer has already been
+    /// asked rather than trusting the model to remember.
+    pub questions: Vec<String>,
     /// Set when the agent believes a manager should take over.
     pub handoff_requested: bool,
     pub handoff_reason: Option<super::handoff::HandoffReason>,

@@ -68,6 +68,23 @@ pub fn idempotency_key(run_id: Uuid, lead_id: Uuid, body: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Outbound idempotency key: one conversation entry and one queued send per
+/// draft. Lives here so the send worker can read the format back.
+pub fn outbound_key(draft_id: DraftId) -> String {
+    format!("out:{draft_id}")
+}
+
+/// Inverse of [`outbound_key`].
+///
+/// The send worker needs it to close the draft it has just delivered: while
+/// the row still reads `pending_approval`, `live_draft_for_lead` keeps handing
+/// that same id back, and the lead's next reply collapses onto it — same
+/// conversation key, same outbox key, nothing queued. Auto-send has no
+/// reviewer to flip the status, so delivery is the moment it flips.
+pub fn draft_id_from_outbound_key(key: &str) -> Option<DraftId> {
+    key.strip_prefix("out:")?.parse().ok()
+}
+
 /// Insert a draft. Returns the existing row when the key was already used.
 ///
 /// When the lead already has a live (pending/approved) draft, that draft is

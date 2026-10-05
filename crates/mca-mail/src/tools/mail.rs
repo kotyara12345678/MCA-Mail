@@ -118,15 +118,15 @@ pub fn define_get_email_attachments() -> ToolDef {
 pub fn define_move_email() -> ToolDef {
     ToolDef {
         name: "move_email".into(),
-        description: "Move email to a different folder (e.g. spam, quarantine)".into(),
+        description: "Move email to a server-discovered folder role".into(),
         allowed_agents: vec![AgentKind::Spam, AgentKind::Classification],
         arg_schema: serde_json::json!({
             "type": "object",
             "properties": {
                 "email_id": { "type": "string" },
-                "folder": { "type": "string" }
+                "role": { "type": "string", "enum": ["inbox", "archive", "drafts", "sent", "spam", "trash"] }
             },
-            "required": ["email_id", "folder"]
+            "required": ["email_id", "role"]
         }),
         destructive: true,
         timeout_seconds: 10,
@@ -277,3 +277,7 @@ pub fn all_tools() -> Vec<ToolDef> {
         define_get_email_status(),
     ]
 }
+
+#[cfg(test)]
+#[path = "mail_role_test.rs"]
+mod tests;

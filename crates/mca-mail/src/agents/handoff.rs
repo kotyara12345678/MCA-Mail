@@ -73,9 +73,5 @@ impl Agent for HandoffAgent {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}... [truncated {} chars]", &s[..max], s.len() - max)
-    }
+    super::prompt::truncate_for_prompt(s, max)
 }

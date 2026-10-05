@@ -20,4 +20,10 @@ pub enum MailError {
     BlockedAttachment(String),
     #[error("mail send rejected: {0}")]
     Rejected(String),
+    /// A mailbox-mutating operation was refused by the read-only guard.
+    ///
+    /// Carries the operation name so the refusal is auditable, never the mail
+    /// content or any credential.
+    #[error("operation not allowed in {mode} mode: {op}")]
+    OperationNotAllowed { op: String, mode: String },
 }

@@ -12,8 +12,10 @@ use crate::orchestration::AgentContext;
 pub struct ClassificationOutput {
     pub category: EmailCategory,
     pub confidence: f32,
+    #[serde(deserialize_with = "crate::domain::flex::string")]
     pub explanation: String,
     pub requires_human: bool,
+    #[serde(deserialize_with = "crate::domain::flex::string")]
     pub suggested_action: String,
 }
 
@@ -46,6 +48,8 @@ Categories:
 - internal: Internal corporate communication
 - advertisement: Third-party promotional content
 - spam: Unsolicited bulk mail
+- business_inquiry: Genuine commercial enquiry that does not fit another service category
+- other: Fits no business shape at all (auto-replies, personal mail, nonsense)
 - uncertain: Not enough information to classify
 
 Respond with: {"category": "...", "confidence": 0.0-1.0, "explanation": "...", "requires_human": false, "suggested_action": "..."}"#;
@@ -70,9 +74,5 @@ impl Agent for ClassificationAgent {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}... [truncated {} chars]", &s[..max], s.len() - max)
-    }
+    super::prompt::truncate_for_prompt(s, max)
 }

@@ -15,6 +15,7 @@
 pub mod agents;
 pub mod api;
 pub mod application;
+pub mod backup;
 pub mod cli;
 pub mod config;
 pub mod domain;
@@ -24,6 +25,7 @@ pub mod mail;
 pub mod observability;
 pub mod orchestration;
 pub mod persistence;
+pub mod shutdown;
 pub mod tools;
 
 pub use config::AppConfig;

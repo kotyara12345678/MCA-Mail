@@ -5,6 +5,7 @@ use crate::domain::{EmailId, InboundMessage, ThreadId};
 use crate::error::AppError;
 
 use super::super::is_unique_violation;
+use super::dedup::{legacy_duplicate, scoped_dedup_key_for};
 
 /// Result of trying to record a message that may already be stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,56 +28,34 @@ impl InsertOutcome {
     }
 }
 
-/// Provider message identifier first, RFC 5322 `Message-ID` second, a content
-/// digest last. A unique index on this key is what makes ingestion idempotent.
-pub fn dedup_key_for(message: &InboundMessage) -> String {
-    let provider = message.provider_message_id.trim();
-    if !provider.is_empty() {
-        return format!("pmid:{provider}");
-    }
-    if let Some(mid) = message.internet_message_id.as_deref() {
-        return format!("mid:{}", mid.trim().to_ascii_lowercase());
-    }
-    format!("sha:{}", content_digest(message))
-}
-
-fn content_digest(message: &InboundMessage) -> String {
-    use sha2::Digest;
-    let mut hasher = sha2::Sha256::new();
-    hasher.update(message.from.address.as_bytes());
-    hasher.update(b"|");
-    hasher.update(message.subject.as_bytes());
-    hasher.update(b"|");
-    hasher.update(
-        message
-            .date
-            .map(|d| d.to_rfc3339())
-            .unwrap_or_default()
-            .as_bytes(),
-    );
-    hasher.update(b"|");
-    hasher.update(message.text_body.as_bytes());
-    hex::encode(hasher.finalize())
-}
-
 fn address_list(list: &[crate::domain::EmailAddress]) -> Vec<String> {
     list.iter().map(|a| a.address.clone()).collect()
 }
 
 /// Store an inbound message, or report the existing row when it is a duplicate.
+///
+/// `uid_validity` is the mailbox's UIDVALIDITY at fetch time. It completes the
+/// `(mailbox, provider_uid, provider_uid_validity)` unique key, so a UID that a
+/// server re-numbered after a validity change cannot collide with its old row,
+/// while a replay of the same UID under the same validity resolves to it.
 pub async fn insert_inbound(
     pool: &PgPool,
     thread_id: ThreadId,
     mailbox: &str,
     message: &InboundMessage,
+    uid_validity: Option<i64>,
 ) -> Result<InsertOutcome, AppError> {
-    let dedup_key = dedup_key_for(message);
+    let dedup_key = scoped_dedup_key_for(mailbox, message);
+    if let Some(id) = legacy_duplicate(pool, mailbox, message).await? {
+        return Ok(InsertOutcome::Duplicate(id));
+    }
     let normalized = crate::domain::normalize_subject(&message.subject);
     let sql = "INSERT INTO emails (thread_id, direction, status, provider, mailbox, provider_uid, \
          internet_message_id, in_reply_to, \"references\", from_address, from_name, to_addresses, \
-         cc_addresses, subject, normalized_subject, date, text_body, size_bytes, dedup_key) \
+         cc_addresses, subject, normalized_subject, date, text_body, size_bytes, dedup_key, \
+         provider_uid_validity) \
          VALUES ($1, 'inbound', 'pending', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, \
-                 $14, $15, $16, $17) RETURNING id"
+                 $14, $15, $16, $17, $18) RETURNING id"
         .to_string();
 
     let inserted = sqlx::query_scalar::<_, Uuid>(&sql)
@@ -97,6 +76,7 @@ pub async fn insert_inbound(
         .bind(&message.text_body)
         .bind(message.total_size as i64)
         .bind(&dedup_key)
+        .bind(uid_validity)
         .fetch_optional(pool)
         .await;
 

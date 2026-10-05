@@ -50,5 +50,18 @@ pub fn check(config: &AppConfig) -> Result<(), ConfigError> {
             reason: "must not exceed MAX_COST_MICROS_PER_DAY".into(),
         });
     }
+    let card = &config.security.manager_card;
+    if card.enabled && card.recipient.trim().is_empty() {
+        return Err(ConfigError::Invalid {
+            field: "MANAGER_CARD_RECIPIENT".into(),
+            reason: "SEND_MANAGER_CARD=true needs a recipient address".into(),
+        });
+    }
+    if card.enabled && card.max_per_hour == 0 {
+        return Err(ConfigError::Invalid {
+            field: "MANAGER_CARD_MAX_PER_HOUR".into(),
+            reason: "must be at least 1".into(),
+        });
+    }
     Ok(())
 }

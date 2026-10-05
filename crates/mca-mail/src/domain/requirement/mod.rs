@@ -5,6 +5,7 @@
 //! definition itself, and API consumers get a stable contract.
 
 mod field;
+mod normalize;
 mod record;
 mod rules;
 mod scope;
@@ -13,5 +14,6 @@ mod scope;
 mod tests;
 
 pub use field::RequirementField;
+pub use normalize::{normalize, NormalizeReport, RawRequirement};
 pub use record::{LeadRequirement, RequirementSource};
 pub use scope::RequirementScope;

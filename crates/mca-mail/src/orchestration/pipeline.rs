@@ -77,6 +77,13 @@ impl Orchestrator {
             return Ok(status);
         }
 
+        // Only categories that may carry a commercial record reach lead
+        // creation: spam, internal traffic and messages the model could not
+        // place must not become rows the manager has to sift through.
+        if !category.allows_lead() {
+            return Ok(EmailStatus::Processed);
+        }
+
         // Qualification off (or no usable lead) means the pipeline ends here.
         let Some((lead_id, company_name)) = self
             .phase_qualification(corr, &ctx_builder, run_id, email_id, thread, category)

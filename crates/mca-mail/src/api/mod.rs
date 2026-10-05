@@ -13,23 +13,20 @@ use tower_http::cors::CorsLayer;
 use crate::api::routes::{email_routes, events, health};
 use crate::config::ApiSettings;
 use crate::orchestration::Orchestrator;
-use crate::persistence::pool::Health;
 
 /// Shared application state accessible from handlers.
 pub struct ApiState {
     pub pool: sqlx::PgPool,
     pub orchestrator: Option<Arc<Orchestrator>>,
     pub start_time: tokio::time::Instant,
-    pub db_health: Health,
 }
 
 impl ApiState {
-    pub fn new(pool: sqlx::PgPool, db_health: Health) -> Self {
+    pub fn new(pool: sqlx::PgPool) -> Self {
         ApiState {
             pool,
             orchestrator: None,
             start_time: tokio::time::Instant::now(),
-            db_health,
         }
     }
 }

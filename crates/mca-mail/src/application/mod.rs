@@ -14,6 +14,7 @@ use crate::api::{self, ApiState};
 use crate::config::AppConfig;
 use crate::error::AppError;
 use crate::llm;
+use crate::mail::MaybeWritable;
 use crate::orchestration::{Orchestrator, OrchestratorBuilder};
 use crate::persistence;
 use crate::tools::{crm, mail as mail_tools, support, ToolRegistry};
@@ -24,6 +25,9 @@ pub struct App {
     pub pool: PgPool,
     pub orchestrator: Arc<Orchestrator>,
     pub state: Arc<ApiState>,
+    /// Shared with the orchestrator and the workers, so exactly one transport
+    /// instance exists per process instead of one per component.
+    pub mailbox: Option<Arc<dyn MaybeWritable>>,
 }
 
 impl App {
@@ -32,7 +36,12 @@ impl App {
         let config = AppConfig::load()?;
         config.validate()?;
 
-        info!(env = %config.app.env, "configuration loaded");
+        info!(
+            env = %config.app.env,
+            mail_mode = %config.mail.mode,
+            mailbox_writes_allowed = config.mail.mode.allows_mailbox_write(),
+            "configuration loaded"
+        );
 
         // 2. Connect to database
         let pool = persistence::pool::connect(&config.database).await?;
@@ -62,7 +71,11 @@ impl App {
             tools.register(def, handler);
         }
 
-        for def in mail_tools::all_tools() {
+        // Mutating mail tools are withheld in read-only mode so an agent is never
+        // offered a call the mail layer will refuse. The guard in the transport
+        // is the actual enforcement; this only avoids wasted iterations.
+        let mail_mode = config.mail.mode;
+        for def in crate::tools::filter_for_mode(mail_tools::all_tools(), mail_mode) {
             let name = def.name.clone();
             let handler = make_mail_tool_handler(&name);
             tools.register(def, handler);
@@ -76,25 +89,38 @@ impl App {
 
         info!(tool_count = %tools.describe_for_agent(crate::domain::AgentKind::Handoff).len(), "tool registry populated");
 
-        // 6. Build orchestrator
+        // 6. Build the mailbox handle once: the orchestrator quarantines spam
+        // through it and the workers read and deliver through the same one.
+        let mailbox: Option<Arc<dyn MaybeWritable>> =
+            match crate::mail::build_writable(&config.mail) {
+                Ok(provider) => Some(Arc::from(provider)),
+                Err(e) => {
+                    error!(error = %e, "failed to build mail provider; poll loop disabled");
+                    None
+                }
+            };
+
+        // 7. Build orchestrator
         let orchestrator = OrchestratorBuilder::new()
             .config(config.clone())
             .pool(pool.clone())
             .tools(tools.clone())
             .llm(llm_provider.clone())
+            .mailbox(mailbox.clone())
             .build()?;
 
         let orchestrator = Arc::new(orchestrator);
 
-        // 7. Build API state
-        let db_health = persistence::pool::health(&pool).await;
-        let state = Arc::new(ApiState::new(pool.clone(), db_health));
+        // 8. Build API state. Health is probed per request by the /health and
+        // /ready handlers, so nothing is snapshotted here.
+        let state = Arc::new(ApiState::new(pool.clone()));
 
         Ok(App {
             config,
             pool,
             orchestrator,
             state,
+            mailbox,
         })
     }
 }

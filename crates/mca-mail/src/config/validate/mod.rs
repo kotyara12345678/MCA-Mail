@@ -6,6 +6,7 @@
 //! have a defensible transport configuration.
 
 mod agents;
+mod backup;
 mod database;
 mod llm;
 mod mail;
@@ -20,5 +21,6 @@ pub fn run(config: &AppConfig) -> Result<(), ConfigError> {
     llm::check(config)?;
     agents::check(config)?;
     security::check(config)?;
+    backup::check(&config.backup)?;
     Ok(())
 }
