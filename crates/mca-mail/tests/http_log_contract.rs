@@ -45,7 +45,13 @@ async fn responses_carry_a_request_id() {
 async fn matched_requests_emit_http_request_events() {
     let mut receiver = bus::subscribe();
     let subscriber = tracing_subscriber::registry().with(bus::BroadcastLayer);
-    let _guard = tracing::subscriber::set_default(subscriber);
+    // Process-wide on purpose. `set_default` only covers the calling thread,
+    // and the two tests of this binary run concurrently, so the middleware of
+    // one can be polled from a thread that carries no subscriber: the event
+    // then reaches nobody and the wait below times out. No other subscriber
+    // is installed in this process, so the global default is safe and the
+    // result no longer depends on which test wins the race.
+    let _ = tracing::subscriber::set_global_default(subscriber);
 
     let response = get(app(), "/health").await;
     assert_eq!(response.status(), StatusCode::OK);
