@@ -148,7 +148,7 @@ fn stub_pipeline(
         &replies::classification_lead(),
     );
     llm.stub_json("lead qualification agent", qualification);
-    llm.stub_json("AI assistant for MCA Logistics", reply);
+    llm.stub_json("customer manager at MCA Logistics", reply);
 }
 
 /// The model extracted nothing: every quote-blocking field is still a gap,

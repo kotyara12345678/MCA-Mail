@@ -173,7 +173,7 @@ async fn commercial_email_creates_lead() {
         &replies::qualification_transport(),
     );
     llm.stub_json(
-        "AI assistant for MCA Logistics",
+        "customer manager at MCA Logistics",
         &replies::communication_draft(),
     );
     let spy = llm.clone();
@@ -216,7 +216,7 @@ async fn reprocessing_does_not_duplicate() {
         &replies::qualification_transport(),
     );
     llm.stub_json(
-        "AI assistant for MCA Logistics",
+        "customer manager at MCA Logistics",
         &replies::communication_draft(),
     );
     let orch = build_orchestrator(pool.clone(), llm as Arc<dyn mca_mail::llm::LlmProvider>);

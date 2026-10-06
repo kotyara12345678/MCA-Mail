@@ -175,7 +175,7 @@ fn stub_turn_one(llm: &MockLlmProvider) {
         &replies::classification_lead(),
     );
     llm.stub_json("lead qualification agent", &turn_one_qualification());
-    llm.stub_json("AI assistant for MCA Logistics", &turn_one_reply());
+    llm.stub_json("customer manager at MCA Logistics", &turn_one_reply());
 }
 
 fn stub_turn_two(llm: &MockLlmProvider) {
@@ -185,7 +185,7 @@ fn stub_turn_two(llm: &MockLlmProvider) {
         &replies::classification_lead(),
     );
     llm.stub_json("lead qualification agent", &turn_two_qualification());
-    llm.stub_json("AI assistant for MCA Logistics", &turn_two_reply());
+    llm.stub_json("customer manager at MCA Logistics", &turn_two_reply());
 }
 
 async fn drafts_for(pool: &sqlx::PgPool, lead_id: mca_mail::domain::LeadId) -> i64 {
