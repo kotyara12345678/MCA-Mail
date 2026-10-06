@@ -128,11 +128,13 @@ impl ImapMailProvider {
                 Ok(value)
             }
             Ok(Err(error)) => {
-                // Any protocol error leaves the stream in an unknown state.
-                // Dropping it is cheaper than diagnosing a desynchronised session.
-                if is_fatal(&error) {
-                    *guard = None;
-                }
+                // Any failed command leaves the stream in an unknown state:
+                // a `NO` the caller did not expect, a reply read off a socket
+                // the server has already shut down, a half-parsed response.
+                // Dropping it is cheaper than diagnosing a desynchronised
+                // session, and it is what keeps a dead connection from being
+                // retried for ever — one poll reconnects, the next one works.
+                *guard = None;
                 Err(error)
             }
             Err(_elapsed) => {
@@ -177,13 +179,6 @@ pub(crate) async fn open_read_only_session(
     mail: &crate::config::MailSettings,
 ) -> Result<ImapSession, MailError> {
     session::connect(mail, true).await
-}
-
-fn is_fatal(error: &MailError) -> bool {
-    matches!(
-        error,
-        MailError::Unavailable(_) | MailError::Auth(_) | MailError::Connect(_)
-    )
 }
 
 fn fetch_session_read_only(mode: crate::config::MailMode) -> bool {

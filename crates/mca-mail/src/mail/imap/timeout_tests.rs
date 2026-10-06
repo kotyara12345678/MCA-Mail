@@ -5,6 +5,10 @@
 //! queued behind it while `/health` kept reporting healthy. The contract here
 //! is that a silent command fails within its deadline, drops the session, and
 //! lets the next call reconnect.
+//!
+//! The sibling contract is [`a_protocol_error_drops_the_session_too`]: a
+//! connection the server has shut down answers with an error rather than
+//! silence, and reusing it would fail every poll for ever.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -28,7 +32,7 @@ struct ScriptedServer {
     connections: Arc<AtomicUsize>,
 }
 
-/// Greeting, login and mailbox selection succeed; the first real query hangs.
+/// Greeting, login and mailbox selection succeed; the first real query wedges.
 async fn start_server() -> ScriptedServer {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let address = listener.local_addr().expect("local address");
@@ -165,5 +169,51 @@ async fn a_silent_command_times_out_instead_of_wedging_the_session() {
         server.connections.load(Ordering::SeqCst),
         2,
         "the session held by the silent command must be replaced, not reused"
+    );
+}
+
+/// A connection the server has already shut down does not stay silent — it
+/// answers with a protocol error (`io: the SSL session has been shut down`).
+/// That is the outage where the mailbox stopped moving for a day: every poll
+/// failed with exactly that error, and because the failure was not classified
+/// as fatal the same dead session was reused — so not one message was read and
+/// the classifier never got the chance to file a single one as spam.
+///
+/// The error is injected instead of produced on the wire: `async-imap` folds a
+/// tagged `NO` on `SEARCH` and `STORE` into an empty result, which would pin
+/// the wrong contract.
+#[tokio::test]
+async fn a_protocol_error_drops_the_session_too() {
+    let server = start_server().await;
+    let settings = settings(server.address.port());
+    let smtp = SmtpTransport::new(
+        &settings,
+        TransportAuth::new(settings.username.clone(), "pass".to_string()),
+    )
+    .expect("smtp transport");
+    let provider = ImapMailProvider::new(&settings, smtp);
+
+    let first = provider
+        .with_session(|_session| {
+            Box::pin(async {
+                Err::<(), _>(MailError::Protocol(
+                    "io: the SSL session has been shut down".into(),
+                ))
+            })
+        })
+        .await;
+    assert!(
+        matches!(first, Err(MailError::Protocol(_))),
+        "expected the injected error back, got {first:?}"
+    );
+
+    let second = provider
+        .with_session(|_session| Box::pin(async { Ok::<(), _>(()) }))
+        .await;
+    assert!(second.is_ok(), "the reconnect failed: {second:?}");
+    assert_eq!(
+        server.connections.load(Ordering::SeqCst),
+        2,
+        "a protocol error must be replaced with a fresh connection, not retried on the dead one"
     );
 }
