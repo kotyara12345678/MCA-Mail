@@ -96,7 +96,7 @@ jobs:
             journalctl --vacuum-size=100M >/dev/null 2>&1 || true
             AUTOCLEAN
             chmod +x /usr/local/bin/mca-autoclean
-            ( crontab -l 2>/dev/null | grep -v mca-autoclean; echo '17 4 * * * /usr/local/bin/mca-autoclean' ) | crontab -
+            ( crontab -l 2>/dev/null | grep -v mca-autoclean || true; echo '17 4 * * * /usr/local/bin/mca-autoclean' ) | crontab -
 
             echo '== runtime env from CI secret =='
             printf '%s\n' "$PROD_ENV" > "$ROOT/MCA-phone/prod/.env"
@@ -108,10 +108,15 @@ jobs:
             docker compose -f prod/docker-compose.yml up -d --remove-orphans
 
             echo '== wait for MCA API =='
-            for i in $(seq 1 60); do
+            for i in $(seq 1 150); do
               curl -sf http://127.0.0.1:8080/health >/dev/null && break
               sleep 2
             done
+            if ! curl -sf http://127.0.0.1:8080/health >/dev/null; then
+              echo 'FATAL: MCA API never became healthy'
+              docker compose -f prod/docker-compose.yml logs --tail 80 mca-mail || true
+              exit 1
+            fi
 
             echo '== bootstrap voice API key =='
             if ! docker compose -f prod/docker-compose.yml exec -T mca-mail /app/mca-mail api-key list 2>/dev/null | grep -q voice-ci; then
