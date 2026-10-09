@@ -85,6 +85,8 @@ jobs:
             apt-get autoremove -y >/dev/null 2>&1 || true
 
             echo '== install auto-clean cron (daily 04:17) =='
+            command -v crontab >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq cron)
+            systemctl enable --now cron >/dev/null 2>&1 || service cron start >/dev/null 2>&1 || true
             cat > /usr/local/bin/mca-autoclean <<'AUTOCLEAN'
             #!/bin/sh
             docker builder prune -af --keep-storage 2GB >/dev/null 2>&1 || true
