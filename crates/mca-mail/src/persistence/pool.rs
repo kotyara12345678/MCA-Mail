@@ -23,12 +23,28 @@ pub async fn connect(settings: &DatabaseSettings) -> Result<PgPool, AppError> {
         })?
         .log_statements(tracing::log::LevelFilter::Debug);
 
+    let statement_timeout_seconds = settings.statement_timeout_seconds;
     let pool = PgPoolOptions::new()
         .max_connections(settings.max_connections.max(1))
         .min_connections(settings.min_connections.min(settings.max_connections))
         .acquire_timeout(settings.acquire_timeout())
         .idle_timeout(Duration::from_secs(600))
         .max_lifetime(Duration::from_secs(1800))
+        .after_connect(move |conn, _meta| {
+            let seconds = statement_timeout_seconds;
+            Box::pin(async move {
+                // Per-connection, not once at startup: `SET` is session-scoped
+                // and a pool hands every query a different session. A runaway
+                // analytics query must not hold a pool slot past the configured
+                // budget. `statement_timeout = 0` disables the guard.
+                if seconds > 0 {
+                    sqlx::query(&format!("SET statement_timeout = '{seconds}s'"))
+                        .execute(&mut *conn)
+                        .await?;
+                }
+                Ok(())
+            })
+        })
         .connect_with(options)
         .await
         .map_err(|e| {
@@ -96,18 +112,4 @@ pub fn short_db_error(error: &sqlx::Error) -> String {
         },
         other => format!("database error: {other}"),
     }
-}
-
-/// Apply a per-statement timeout to a connection.
-///
-/// Done once at startup so an accidentally expensive query in the API cannot
-/// hold a pool slot indefinitely.
-pub async fn apply_statement_timeout(pool: &PgPool, seconds: u64) -> Result<(), AppError> {
-    if seconds == 0 {
-        return Ok(());
-    }
-    sqlx::query(&format!("SET statement_timeout = {}00", seconds * 1000))
-        .execute(pool)
-        .await?;
-    Ok(())
 }

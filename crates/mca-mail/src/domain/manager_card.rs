@@ -12,6 +12,114 @@ use crate::domain::{
 /// Marker shown wherever a value was never provided.
 pub const UNKNOWN: &str = "не предоставлено";
 
+// --- shared rendering helpers ------------------------------------------------
+// Free functions rather than methods: the order card renders the same rows for
+// the customer and must not drift from the manager's copy.
+
+/// The stored value of one requirement, trimmed; `None` when absent or blank.
+pub(super) fn value_of(
+    requirements: &[LeadRequirement],
+    field: RequirementField,
+) -> Option<String> {
+    requirements
+        .iter()
+        .find(|r| r.field == field)
+        .and_then(|r| r.value.as_deref())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
+/// The unit of a quantity field: the row's own `unit` column wins, otherwise
+/// the paired `<field>_unit` requirement (the way a spoken value arrives).
+pub(super) fn unit_of(requirements: &[LeadRequirement], field: RequirementField) -> String {
+    let unit_field = match field {
+        RequirementField::GoodsWeight => Some(RequirementField::GoodsWeightUnit),
+        RequirementField::GoodsVolume => Some(RequirementField::GoodsVolumeUnit),
+        RequirementField::GoodsQuantity => Some(RequirementField::GoodsQuantityUnit),
+        _ => None,
+    };
+    let from_column = requirements
+        .iter()
+        .find(|r| r.field == field)
+        .and_then(|r| r.unit.clone())
+        .unwrap_or_default();
+    if !from_column.is_empty() {
+        return from_column;
+    }
+    unit_field
+        .and_then(|f| value_of(requirements, f))
+        .unwrap_or_default()
+}
+
+/// `"12 т"` — value joined with its unit, or the bare value when no unit was
+/// ever stated (never a dangling space).
+pub(super) fn quantity_of(requirements: &[LeadRequirement], field: RequirementField) -> String {
+    let value = value_of(requirements, field).unwrap_or_else(|| UNKNOWN.to_string());
+    let unit = unit_of(requirements, field);
+    if value == UNKNOWN || unit.is_empty() {
+        value
+    } else {
+        format!("{value} {unit}")
+    }
+}
+
+/// `"Самара → Москва"` — city preferred over country on each end.
+pub(super) fn route_of(requirements: &[LeadRequirement]) -> String {
+    let from = [
+        value_of(requirements, RequirementField::OriginCity),
+        value_of(requirements, RequirementField::OriginCountry),
+    ]
+    .into_iter()
+    .flatten()
+    .next()
+    .unwrap_or_else(|| UNKNOWN.to_string());
+    let to = [
+        value_of(requirements, RequirementField::DestinationCity),
+        value_of(requirements, RequirementField::DestinationCountry),
+    ]
+    .into_iter()
+    .flatten()
+    .next()
+    .unwrap_or_else(|| UNKNOWN.to_string());
+    format!("{from} → {to}")
+}
+
+/// `"да"` / `"нет"` / `"не предоставлено"` — a boolean requirement never
+/// rendered as its raw literal.
+pub(super) fn flag_of(requirements: &[LeadRequirement], field: RequirementField) -> String {
+    match value_of(requirements, field).as_deref() {
+        Some(v) if matches!(v.to_ascii_lowercase().as_str(), "true" | "yes" | "да" | "1") => {
+            "да".to_string()
+        }
+        Some(_) => "нет".to_string(),
+        None => UNKNOWN.to_string(),
+    }
+}
+
+pub(super) fn scope_label(scope: RequirementScope) -> &'static str {
+    match scope {
+        RequirementScope::Transport => "перевозка",
+        RequirementScope::Customs => "таможенное оформление",
+        RequirementScope::Procurement => "закупка за рубежом",
+        RequirementScope::FullImport => "полное сопровождение импорта",
+    }
+}
+
+/// Russian label for a blocking gap. `blocking_gaps` can only return a
+/// quote-blocking field, so the five arms below cover every value it
+/// produces and the rest fall back to the stable column name.
+pub(super) fn gap_label(field: RequirementField) -> &'static str {
+    match field {
+        RequirementField::GoodsName => "наименование товара",
+        RequirementField::OriginCountry => "страна отправления",
+        RequirementField::DestinationCountry => "страна назначения",
+        RequirementField::GoodsWeight => "вес",
+        RequirementField::GoodsQuantity => "количество",
+        other => other.as_str(),
+    }
+}
+
 /// Everything the card is built from. Assembled by the caller, rendered here.
 #[derive(Debug, Clone)]
 pub struct ManagerCard<'a> {
@@ -23,85 +131,15 @@ pub struct ManagerCard<'a> {
 
 impl ManagerCard<'_> {
     fn get(&self, field: RequirementField) -> Option<String> {
-        self.requirements
-            .iter()
-            .find(|r| r.field == field)
-            .and_then(|r| r.value.as_deref())
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string)
+        value_of(self.requirements, field)
     }
 
     fn need(&self, field: RequirementField) -> String {
         self.get(field).unwrap_or_else(|| UNKNOWN.to_string())
     }
 
-    fn flag(&self, field: RequirementField) -> String {
-        match self.get(field).as_deref() {
-            Some(v) if matches!(v.to_ascii_lowercase().as_str(), "true" | "yes" | "да" | "1") => {
-                "да".to_string()
-            }
-            Some(_) => "нет".to_string(),
-            None => UNKNOWN.to_string(),
-        }
-    }
-
-    fn unit(&self, field: RequirementField) -> String {
-        let unit_field = match field {
-            RequirementField::GoodsWeight => Some(RequirementField::GoodsWeightUnit),
-            RequirementField::GoodsVolume => Some(RequirementField::GoodsVolumeUnit),
-            RequirementField::GoodsQuantity => Some(RequirementField::GoodsQuantityUnit),
-            _ => None,
-        };
-        let from_column = self
-            .requirements
-            .iter()
-            .find(|r| r.field == field)
-            .and_then(|r| r.unit.clone())
-            .unwrap_or_default();
-        if !from_column.is_empty() {
-            return from_column;
-        }
-        unit_field.and_then(|f| self.get(f)).unwrap_or_default()
-    }
-
     fn quantity(&self, field: RequirementField) -> String {
-        let value = self.need(field);
-        let unit = self.unit(field);
-        if value == UNKNOWN || unit.is_empty() {
-            value
-        } else {
-            format!("{value} {unit}")
-        }
-    }
-
-    fn route(&self) -> String {
-        let from = [
-            self.get(RequirementField::OriginCity),
-            self.get(RequirementField::OriginCountry),
-        ]
-        .into_iter()
-        .flatten()
-        .next()
-        .unwrap_or_else(|| UNKNOWN.to_string());
-        let to = [
-            self.get(RequirementField::DestinationCity),
-            self.get(RequirementField::DestinationCountry),
-        ]
-        .into_iter()
-        .flatten()
-        .next()
-        .unwrap_or_else(|| UNKNOWN.to_string());
-        format!("{from} → {to}")
-    }
-
-    fn scope_label(scope: RequirementScope) -> &'static str {
-        match scope {
-            RequirementScope::Transport => "перевозка",
-            RequirementScope::Customs => "таможенное оформление",
-            RequirementScope::Procurement => "закупка за рубежом",
-            RequirementScope::FullImport => "полное сопровождение импорта",
-        }
+        quantity_of(self.requirements, field)
     }
 
     fn status_label(status: LeadStatus) -> &'static str {
@@ -119,20 +157,6 @@ impl ManagerCard<'_> {
         }
     }
 
-    /// Russian label for a blocking gap. `blocking_gaps` can only return a
-    /// quote-blocking field, so the five arms below cover every value it
-    /// produces and the rest fall back to the stable column name.
-    fn gap_label(field: RequirementField) -> &'static str {
-        match field {
-            RequirementField::GoodsName => "наименование товара",
-            RequirementField::OriginCountry => "страна отправления",
-            RequirementField::DestinationCountry => "страна назначения",
-            RequirementField::GoodsWeight => "вес",
-            RequirementField::GoodsQuantity => "количество",
-            other => other.as_str(),
-        }
-    }
-
     /// What still stands between this lead and a quote. A card that says only
     /// "в работе" is not actionable; this is the actionable half of `Статус`.
     fn gaps(&self) -> String {
@@ -142,7 +166,7 @@ impl ManagerCard<'_> {
         }
         missing
             .iter()
-            .map(|f| Self::gap_label(*f))
+            .map(|f| gap_label(*f))
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -166,21 +190,27 @@ impl ManagerCard<'_> {
             ("Продукт / груз", self.need(RequirementField::GoodsName)),
             ("Вес", weight),
             ("Объём", volume),
-            ("Маршрут", self.route()),
+            ("Маршрут", route_of(self.requirements)),
             ("Сроки", self.need(RequirementField::DesiredDeadline)),
             ("Транспорт", self.need(RequirementField::TransportMode)),
-            ("Закупка", self.flag(RequirementField::NeedsProcurement)),
+            (
+                "Закупка",
+                flag_of(self.requirements, RequirementField::NeedsProcurement),
+            ),
             (
                 "Таможня",
-                self.flag(RequirementField::NeedsCustomsClearance),
+                flag_of(self.requirements, RequirementField::NeedsCustomsClearance),
             ),
-            ("Страхование", self.flag(RequirementField::NeedsInsurance)),
+            (
+                "Страхование",
+                flag_of(self.requirements, RequirementField::NeedsInsurance),
+            ),
             ("Стоимость груза", value),
             (
                 "Дополнительные условия",
                 self.need(RequirementField::AdditionalRequirements),
             ),
-            ("Услуги", Self::scope_label(self.lead.scope).to_string()),
+            ("Услуги", scope_label(self.lead.scope).to_string()),
             (
                 "Исходная тема",
                 self.history
@@ -276,7 +306,7 @@ impl ManagerCard<'_> {
 
 /// HTML escaping. Present because the card carries customer-controlled text
 /// (company name, free-form conditions) straight into an HTML mail part.
-fn escape(value: &str) -> String {
+pub(super) fn escape(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for c in value.chars() {
         match c {

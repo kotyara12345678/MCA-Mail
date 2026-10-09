@@ -150,6 +150,22 @@ pub async fn update_identity(
     Ok(())
 }
 
+/// Store the customer's email address on the lead.
+///
+/// The voice channel starts with `contact_email` holding the caller number,
+/// so this is where a dictated address replaces it — and with it, whether an
+/// order card can be addressed at all. The value is validated by
+/// `voice::normalize_email` before it reaches here; the caller owns the
+/// format decision, this function owns persistence.
+pub async fn set_contact_email(pool: &PgPool, id: LeadId, email: &str) -> Result<(), AppError> {
+    sqlx::query("UPDATE leads SET contact_email = $2, last_activity_at = now() WHERE id = $1")
+        .bind(id)
+        .bind(email)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn mark_callback(
     pool: &PgPool,
     id: LeadId,

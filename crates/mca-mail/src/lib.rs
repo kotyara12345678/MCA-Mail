@@ -27,6 +27,7 @@ pub mod orchestration;
 pub mod persistence;
 pub mod shutdown;
 pub mod tools;
+pub mod voice;
 
 pub use config::AppConfig;
 pub use error::{AppError, ConfigError, LlmError, MailError, PolicyError, ToolError};

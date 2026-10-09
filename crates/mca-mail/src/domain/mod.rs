@@ -13,6 +13,7 @@ mod ids;
 mod lead;
 mod manager_card;
 mod message;
+mod order_card;
 mod processing;
 mod requirement;
 mod research;
@@ -46,6 +47,7 @@ pub use message::{
     EmailAttachment, ExtractionStatus, InboundMessage, MailboxIdentity, MessagePart,
     OutboundAttachment, OutboundMessage,
 };
+pub use order_card::OrderCard;
 pub use processing::{
     AgentRunRecord, EmailThread, EventSeverity, ProcessingEvent, ProcessingRun, ProcessingStage,
     RunState, RunTrigger, ToolCallRecord, ToolCallStatus,

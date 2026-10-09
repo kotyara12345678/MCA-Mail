@@ -19,6 +19,7 @@ pub mod rows;
 pub mod run_repo;
 pub mod settings_repo;
 pub mod thread_repo;
+pub mod voice_repo;
 
 pub use pool::{connect, health, is_unique_violation, short_db_error, Health};
 

@@ -13,6 +13,7 @@ use axum::{
 use serde::Serialize;
 
 use crate::api::SharedState;
+use crate::error::AppError;
 use crate::persistence::api_key_repo::{self, Role};
 
 /// Identity attached to an authenticated request.
@@ -77,6 +78,17 @@ impl AuthError {
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         (self.status, Json(self)).into_response()
+    }
+}
+
+impl From<AuthError> for AppError {
+    fn from(err: AuthError) -> Self {
+        match err.status {
+            StatusCode::UNAUTHORIZED => AppError::Unauthorized(err.message),
+            StatusCode::FORBIDDEN => AppError::Forbidden(err.message),
+            StatusCode::INTERNAL_SERVER_ERROR => AppError::Internal(err.message),
+            _ => AppError::Forbidden(err.message),
+        }
     }
 }
 

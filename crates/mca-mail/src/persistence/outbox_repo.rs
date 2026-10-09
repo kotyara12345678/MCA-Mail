@@ -21,6 +21,8 @@ crate::domain::wire_enum! {
     OutboundKind {
         CustomerReply => "customer_reply",
         ManagerCard => "manager_card",
+        /// Customer-facing order card queued when a phone call finishes.
+        OrderCard => "order_card",
     }
 }
 

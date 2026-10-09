@@ -10,7 +10,7 @@ use std::sync::Arc;
 use axum::Router;
 use tower_http::cors::CorsLayer;
 
-use crate::api::routes::{email_routes, events, health};
+use crate::api::routes::{email_routes, events, health, voice};
 use crate::config::ApiSettings;
 use crate::orchestration::Orchestrator;
 
@@ -43,6 +43,7 @@ pub fn build_router(_settings: &ApiSettings, state: SharedState) -> Router {
     Router::new()
         .merge(health::routes())
         .merge(email_routes::routes())
+        .merge(voice::routes())
         .layer(CorsLayer::permissive())
         .layer(axum::middleware::from_fn(http_log::log_request))
         .merge(events::routes())
