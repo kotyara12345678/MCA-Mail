@@ -1,0 +1,56 @@
+name: Deploy to server
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-stack
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT }}
+          envs: PROD_ENV
+          script: |
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            ROOT=/srv/mca
+            command -v git >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq git curl)
+            command -v docker >/dev/null 2>&1 || (curl -fsSL https://get.docker.com | sh)
+            mkdir -p "$ROOT"
+
+            sync() {
+              dir="$1"; url="$2"
+              if [ ! -d "$ROOT/$dir/.git" ]; then
+                git clone --depth 1 "$url" "$ROOT/$dir"
+              else
+                cd "$ROOT/$dir"
+                git fetch --depth 1 origin main
+                git reset --hard origin/main
+              fi
+            }
+            sync MCA-Mail  https://github.com/kotyara12345678/MCA-Mail.git
+            sync MCA-phone https://github.com/kotyara12345678/MCA-phone-.git
+
+            # runtime env — never stored in git, delivered as a CI secret
+            printf '%s\n' "$PROD_ENV" > "$ROOT/MCA-phone/prod/.env"
+
+            cd "$ROOT/MCA-phone"
+            docker compose -f prod/docker-compose.yml pull || true
+            docker compose -f prod/docker-compose.yml up -d --build --remove-orphans
+            docker image prune -f >/dev/null 2>&1 || true
+            echo '--- stack status ---'
+            docker compose -f prod/docker-compose.yml ps
+        env:
+          PROD_ENV: ${{ secrets.PROD_ENV }}
