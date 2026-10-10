@@ -76,7 +76,11 @@ struct HandoffBody {
 
 #[derive(Deserialize)]
 struct TranscriptLine {
+    /// AVA's final transcript uses OpenAI-style `role`/`content` keys;
+    /// the MCA wire names (`direction`/`body`) stay canonical.
+    #[serde(alias = "role")]
     direction: String,
+    #[serde(alias = "content")]
     body: String,
 }
 
