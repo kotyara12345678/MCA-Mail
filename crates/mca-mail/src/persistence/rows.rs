@@ -33,6 +33,7 @@ pub struct EmailRow {
     pub html_present: bool,
     pub size_bytes: i64,
     pub lead_id: Option<Uuid>,
+    pub order_flag: bool,
     pub labels: Vec<String>,
     pub dedup_key: String,
     pub attempts: i32,
@@ -45,8 +46,8 @@ pub struct EmailRow {
 pub const EMAIL_COLUMNS: &str = "id, thread_id, direction, status, category, spam_verdict, \
      mailbox_action, provider, mailbox, provider_uid, provider_uid_validity, internet_message_id, \
      in_reply_to, \"references\", from_address, from_name, to_addresses, cc_addresses, subject, \
-     normalized_subject, date, received_at, text_body, html_present, size_bytes, lead_id, labels, \
-     dedup_key, attempts, last_error, processed_at, created_at";
+     normalized_subject, date, received_at, text_body, html_present, size_bytes, lead_id, \
+     order_flag, labels, dedup_key, attempts, last_error, processed_at, created_at";
 
 /// Compact projection used by list endpoints; excludes the body.
 #[derive(Debug, Clone, FromRow, serde::Serialize)]
@@ -59,6 +60,7 @@ pub struct EmailSummaryRow {
     pub from_address: String,
     pub from_name: Option<String>,
     pub subject: String,
+    pub order_flag: bool,
     pub received_at: DateTime<Utc>,
     pub lead_id: Option<Uuid>,
     pub size_bytes: i64,

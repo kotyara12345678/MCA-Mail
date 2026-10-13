@@ -107,6 +107,9 @@ pub struct StoredEmail {
     pub category: Option<super::class::EmailCategory>,
     pub spam_verdict: Option<super::class::SpamVerdict>,
     pub lead_id: Option<super::ids::LeadId>,
+    /// Red flag: the pipeline found this message to be about a potential or
+    /// running order. A manager's bookmark, never a lead-status change.
+    pub order_flag: bool,
     pub labels: Vec<String>,
     pub mailbox_action: MailboxAction,
     pub last_error: Option<String>,

@@ -42,7 +42,7 @@ pub async fn list(
 ) -> Result<Vec<EmailSummaryRow>, AppError> {
     let sql = format!(
         "SELECT id, thread_id, status, category, spam_verdict, from_address, from_name, \
-         subject, received_at, lead_id, size_bytes, attempts, last_error FROM emails \
+         subject, order_flag, received_at, lead_id, size_bytes, attempts, last_error FROM emails \
          {LIST_PREDICATE} ORDER BY received_at DESC, id DESC LIMIT $5 OFFSET $6"
     );
     let rows = sqlx::query_as::<_, EmailSummaryRow>(&sql)
@@ -126,6 +126,44 @@ pub async fn thread_of(pool: &PgPool, id: EmailId) -> Result<Option<ThreadId>, A
         .fetch_optional(pool)
         .await?;
     Ok(row)
+}
+
+/// The spam verdict phase 1 stored, `None` when the spam agent has not run.
+pub async fn spam_verdict(
+    pool: &PgPool,
+    id: EmailId,
+) -> Result<Option<crate::domain::SpamVerdict>, AppError> {
+    let raw =
+        sqlx::query_scalar::<_, Option<String>>("SELECT spam_verdict FROM emails WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+    match raw {
+        Some(value) => Ok(parse_enum_opt(value.as_deref(), "emails.spam_verdict")?),
+        None => Ok(None),
+    }
+}
+
+/// Whether another message in the thread already carries the order context:
+/// the red flag itself, or a lead the pipeline attached.
+///
+/// This is what keeps a client's follow-up — an invoice, a clarification of
+/// weight or dates, a confirmation — tied to the order the conversation
+/// started with, even when the follow-up on its own reads as neutral. The
+/// message being classified never counts as its own context.
+pub async fn thread_has_order(
+    pool: &PgPool,
+    thread_id: ThreadId,
+    excluding: EmailId,
+) -> Result<bool, AppError> {
+    let sql = "SELECT EXISTS(SELECT 1 FROM emails \
+               WHERE thread_id = $1 AND id <> $2 AND (order_flag OR lead_id IS NOT NULL))";
+    let context = sqlx::query_scalar::<_, bool>(sql)
+        .bind(thread_id)
+        .bind(excluding)
+        .fetch_one(pool)
+        .await?;
+    Ok(context)
 }
 
 /// Whether an address already participates in a thread with this subject.
@@ -248,6 +286,7 @@ pub(crate) fn to_stored(row: EmailRow) -> Result<StoredEmail, AppError> {
         category: parse_enum_opt(row.category.as_deref(), "emails.category")?,
         spam_verdict: parse_enum_opt(row.spam_verdict.as_deref(), "emails.spam_verdict")?,
         lead_id: row.lead_id,
+        order_flag: row.order_flag,
         labels: row.labels,
         mailbox_action: parse_enum(&row.mailbox_action, "emails.mailbox_action")?,
         last_error: row.last_error,

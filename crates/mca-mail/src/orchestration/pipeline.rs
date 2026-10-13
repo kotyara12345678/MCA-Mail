@@ -71,7 +71,7 @@ impl Orchestrator {
             return Ok(status);
         }
         let (category, early) = self
-            .phase_classification(corr, &ctx_builder, run_id, email_id)
+            .phase_classification(corr, &ctx_builder, run_id, email_id, thread)
             .await?;
         if let Some(status) = early {
             return Ok(status);

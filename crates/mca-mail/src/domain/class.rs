@@ -99,6 +99,41 @@ impl SpamVerdict {
     }
 }
 
+/// The red flag rule: does this message look like a potential or running order?
+///
+/// Deliberately deterministic — it owns no model call and no classification
+/// of its own, it only consumes what the pipeline already produced. A
+/// manager uses the flag to find work, so it has to stay trustworthy:
+/// anything ambiguous stays unflagged, and a category the model could not
+/// place never earns the flag from context alone.
+///
+/// `thread_context` is true when another message in the same thread already
+/// carries the flag or a lead — that is what ties a client's follow-up (an
+/// invoice, a clarification of weight or dates, a confirmation) back to the
+/// order the conversation started with.
+pub fn is_order_related(
+    category: EmailCategory,
+    spam: Option<SpamVerdict>,
+    confidence: f32,
+    thread_context: bool,
+) -> bool {
+    // Bulk mail, ads and machine notifications are never order traffic,
+    // whatever they managed to get classified as.
+    match spam {
+        Some(verdict) if verdict.quarantine() => return false,
+        Some(SpamVerdict::AutomatedNotification) => return false,
+        _ => {}
+    }
+    // A neutral category — a document, a confirmation, a complaint — still
+    // belongs to the order when the thread around it already does.
+    if thread_context && category.allows_lead() && !category.is_demand() {
+        return true;
+    }
+    // Genuine commercial demand, but only when the model was sure of it or
+    // the thread proves the conversation is about an order.
+    category.is_demand() && (confidence >= Confidence::AUTO_ACTION_THRESHOLD || thread_context)
+}
+
 crate::domain::wire_enum! {
     /// Per-field certainty for an extracted commercial parameter.
     FieldState {

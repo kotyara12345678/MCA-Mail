@@ -29,7 +29,7 @@ pub use channel::{
     ChannelError, ChannelHealth, ChannelMetadata, CommunicationChannel, ContactRef, Conversation,
     InboundEnvelope, OutboundEnvelope,
 };
-pub use class::{Confidence, EmailCategory, FieldState, SpamVerdict};
+pub use class::{is_order_related, Confidence, EmailCategory, FieldState, SpamVerdict};
 pub use classification::{ClassificationOutcome, ClassificationRecord, NextAction, SpamAssessment};
 pub use draft::{DraftStatus, EmailDraft};
 pub use email_record::{AgentKind, Direction, EmailStatus, MailboxAction, ModelTier, StoredEmail};

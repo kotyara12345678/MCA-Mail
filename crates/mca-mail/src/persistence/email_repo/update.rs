@@ -92,6 +92,20 @@ pub async fn attach_lead(pool: &PgPool, id: EmailId, lead_id: Uuid) -> Result<()
     Ok(())
 }
 
+/// Raise the red flag that marks a message as potential order traffic.
+///
+/// Idempotent and one-way: a reprocess reaches the same verdict and writes
+/// nothing new, and a later run that happens to read the message differently
+/// never takes the flag away — the flag is a manager's bookmark, and a
+/// bookmark that disappears on its own is worse than one left behind.
+pub async fn raise_order_flag(pool: &PgPool, id: EmailId) -> Result<(), AppError> {
+    sqlx::query("UPDATE emails SET order_flag = TRUE WHERE id = $1 AND NOT order_flag")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Record a failed attempt and return the new attempt counter (retry telemetry).
 pub async fn record_error(pool: &PgPool, id: EmailId, error: &str) -> Result<i32, AppError> {
     let attempts = sqlx::query_scalar(
