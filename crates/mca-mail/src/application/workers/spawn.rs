@@ -21,6 +21,9 @@ use super::spawn_mail::spawn_mail;
 pub struct WorkerSet {
     pub(super) shutdown: Signal,
     pub(super) handles: Vec<tokio::task::JoinHandle<()>>,
+    /// The mail reader's wake-up handle, for the panel's "check mail now".
+    /// `None` when no mail loop was started (no mailbox, backups only).
+    pub sync: Option<super::MailSync>,
 }
 
 impl WorkerSet {
@@ -57,6 +60,7 @@ pub async fn spawn_all(
     let mut set = WorkerSet {
         shutdown: shutdown.clone(),
         handles: Vec::new(),
+        sync: None,
     };
 
     if let Some(handle) = super::backup::spawn(
@@ -85,7 +89,8 @@ pub async fn spawn_all(
         error!(error = %e, "failed to recover interrupted emails");
     }
 
-    spawn_mail(config, &mut set, reader, pool.clone(), orchestrator);
+    let sync = spawn_mail(config, &mut set, reader, pool.clone(), orchestrator);
+    set.sync = Some(sync);
 
     set.handles.push(tokio::spawn(super::outbox::outbox_loop(
         pool,

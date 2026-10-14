@@ -284,3 +284,18 @@ pub async fn total_sends_since(
     .await?;
     Ok(count)
 }
+
+/// Rows matching a filter, without fetching them (panel pagination).
+pub async fn count(pool: &PgPool, filter: &DraftFilter) -> Result<i64, AppError> {
+    let total = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM email_drafts \
+         WHERE ($1::uuid IS NULL OR lead_id = $1) AND ($2::uuid IS NULL OR email_id = $2) \
+         AND ($3::text IS NULL OR status = $3)",
+    )
+    .bind(filter.lead_id)
+    .bind(filter.email_id)
+    .bind(filter.status.map(|s| s.as_str().to_string()))
+    .fetch_one(pool)
+    .await?;
+    Ok(total)
+}

@@ -278,6 +278,21 @@ pub async fn release(pool: &PgPool, id: Uuid) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Requeue a failed or held send from the panel: attempts and the previous
+/// error are cleared so the next tick treats it as a fresh delivery.
+/// Returns `false` when the row exists but is not in a retryable state.
+pub async fn retry(pool: &PgPool, id: Uuid) -> Result<bool, AppError> {
+    let result = sqlx::query(
+        "UPDATE mailbox_outbox SET status = 'queued', attempts = 0, last_error = NULL, \
+         policy_denial = NULL, claimed_at = NULL, next_attempt_at = now() \
+         WHERE id = $1 AND status IN ('failed', 'held')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Hand back every send whose worker never came back.
 ///
 /// Called once per tick rather than inside `claim_due`, so a batch that is

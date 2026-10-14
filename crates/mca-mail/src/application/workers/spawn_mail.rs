@@ -11,7 +11,7 @@ use crate::mail::idle::{Backoff, IdleSource};
 use crate::mail::MailProvider;
 use crate::orchestration::Orchestrator;
 
-use super::{fallback, idle as idle_worker, queue, retention_loop, sync, WorkerSet};
+use super::{fallback, idle as idle_worker, queue, retention_loop, sync, MailSync, WorkerSet};
 
 pub(super) fn spawn_mail(
     config: &AppConfig,
@@ -19,7 +19,7 @@ pub(super) fn spawn_mail(
     provider: Arc<dyn MailProvider>,
     pool: PgPool,
     orchestrator: Arc<Orchestrator>,
-) {
+) -> MailSync {
     let shutdown = set.shutdown.subscribe();
     let (sync, trigger) = sync::sync_channel();
     let mailbox = config.mail.inbox().to_string();
@@ -34,7 +34,7 @@ pub(super) fn spawn_mail(
     )));
 
     if let Some(source) = crate::mail::idle::build(&config.mail) {
-        spawn_watchers(config, set, source, sync, shutdown.clone());
+        spawn_watchers(config, set, source, sync.clone(), shutdown.clone());
     }
 
     set.handles.push(tokio::spawn(queue::queue_loop(
@@ -50,6 +50,7 @@ pub(super) fn spawn_mail(
             shutdown,
         )));
     }
+    sync
 }
 
 /// The watcher and the safety-net poller that keeps it honest.

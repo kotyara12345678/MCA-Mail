@@ -5,6 +5,8 @@
 //! `operator` (session cookies carry `admin`, so the panel itself passes
 //! both).
 
+mod drafts;
+mod maintenance;
 mod ops;
 mod profiles;
 mod settings;
@@ -22,4 +24,6 @@ pub fn routes() -> Router<SharedState> {
         .merge(usage::routes())
         .merge(profiles::routes())
         .merge(ops::routes())
+        .merge(drafts::routes())
+        .merge(maintenance::routes())
 }

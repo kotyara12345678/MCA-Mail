@@ -19,17 +19,17 @@ use crate::persistence::run_repo::{self, AgentRunSummary, RunSummary};
 
 #[derive(Debug, Deserialize)]
 pub struct PageQuery {
-    limit: Option<i64>,
-    offset: Option<i64>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 #[derive(Debug, serde::Serialize)]
 pub struct Paged<T> {
-    items: Vec<T>,
-    total: i64,
+    pub items: Vec<T>,
+    pub total: i64,
 }
 
-fn page(query: &PageQuery) -> (i64, i64) {
+pub fn page(query: &PageQuery) -> (i64, i64) {
     (
         query.limit.unwrap_or(50).clamp(1, 200),
         query.offset.unwrap_or(0).max(0),

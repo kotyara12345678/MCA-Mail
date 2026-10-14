@@ -2,50 +2,90 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2f6fed">
+<meta name="color-scheme" content="light">
 <title>MCA Mail — панель</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
+<!-- Иконки: один спрайт, дальше только <use href="#i-..."> -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 9.5 12 3l9 6.5V20a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 20z"/><path d="M9 21.5v-7h6v7"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
+  <symbol id="i-draft" viewBox="0 0 24 24"><path d="M14 2.5H6.5A1.5 1.5 0 0 0 5 4v16a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 20V7.5z"/><path d="M14 2.5v5h5"/><path d="M8.5 13.5h7M8.5 17h5"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20.5v-1a5 5 0 0 1 5-5h3a5 5 0 0 1 5 5v1"/><path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6M18.6 14.7a5 5 0 0 1 2.9 4.5v1.3"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+  <symbol id="i-money" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M14.8 9.2c-.5-.8-1.5-1.2-2.8-1.2-1.6 0-2.8.8-2.8 2s1 1.7 2.8 2.1c1.9.4 3 .9 3 2.2s-1.3 2.1-3 2.1c-1.4 0-2.5-.5-3-1.4"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M21 12h-4l-3 7-6-14-3 7H3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11.5A8 8 0 0 0 6.3 6.3L3.5 9"/><path d="M4 12.5A8 8 0 0 0 17.7 17.7l2.8-2.7"/><path d="M3.5 4v5h5M20.5 20v-5h-5"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M21 12.5h-5l-1.5 3h-5l-1.5-3H3"/><path d="M5.5 5h13l2.5 7.5v4A1.5 1.5 0 0 1 19.5 18h-15A1.5 1.5 0 0 1 3 16.5v-4z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M21.5 2.5 10.5 13.5"/><path d="M21.5 2.5 14.5 21.5l-4-8-8-4z"/></symbol>
+</svg>
+
+<!-- Вход -->
 <div id="login-view" class="login-wrap hidden">
   <form id="login-form" class="login-card" autocomplete="on">
-    <h1>MCA Mail</h1>
-    <p class="muted">Вход в панель управления</p>
+    <div class="login-brand">
+      <span class="logo-dot"></span>
+      <div>
+        <div class="login-title">MCA Mail</div>
+        <div class="login-sub">панель управления почтой</div>
+      </div>
+    </div>
     <label>Логин
-      <input id="login-input" name="username" autocomplete="username" required>
+      <input id="login-input" name="username" autocomplete="username" autocapitalize="none" required>
     </label>
     <label>Пароль
       <input id="login-password" name="password" type="password" autocomplete="current-password" required>
     </label>
-    <button type="submit" class="btn primary">Войти</button>
+    <button type="submit" class="btn primary block" id="login-btn">Войти</button>
     <p id="login-error" class="error hidden"></p>
+    <p class="login-hint">Тот же логин и пароль, что от почтового ящика.</p>
   </form>
 </div>
 
+<!-- Приложение -->
 <div id="app-view" class="app hidden">
-  <aside class="sidebar">
-    <div class="brand">MCA&nbsp;Mail</div>
-    <nav id="nav">
-      <a href="#/dashboard" data-page="dashboard">Дашборд</a>
-      <a href="#/emails" data-page="emails">Письма</a>
-      <a href="#/leads" data-page="leads">Лиды</a>
-      <a href="#/models" data-page="models">Модели</a>
-      <a href="#/usage" data-page="usage">Стоимость</a>
-      <a href="#/pipeline" data-page="pipeline">Пайплайн</a>
-      <a href="#/events" data-page="events">События</a>
-    </nav>
-    <div class="sidebar-foot">
-      <div id="user-box" class="muted small"></div>
-      <button id="logout-btn" class="btn ghost">Выйти</button>
-    </div>
-  </aside>
-  <main id="main" class="main">
-    <div class="muted">Загрузка…</div>
-  </main>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo-dot"></span>MCA&nbsp;Mail</div>
+      <nav id="nav" aria-label="Разделы">
+        <a href="#/dashboard" data-page="dashboard"><svg class="ic"><use href="#i-home"/></svg><span>Обзор</span></a>
+        <a href="#/emails" data-page="emails"><svg class="ic"><use href="#i-mail"/></svg><span>Письма</span><b class="nav-dot hidden" id="nav-emails"></b></a>
+        <a href="#/drafts" data-page="drafts"><svg class="ic"><use href="#i-draft"/></svg><span>Черновики</span><b class="nav-dot hidden" id="nav-drafts"></b></a>
+        <a href="#/leads" data-page="leads"><svg class="ic"><use href="#i-users"/></svg><span>Лиды</span></a>
+        <a href="#/models" data-page="models"><svg class="ic"><use href="#i-cpu"/></svg><span>Модели</span></a>
+        <a href="#/usage" data-page="usage"><svg class="ic"><use href="#i-money"/></svg><span>Затраты</span></a>
+        <a href="#/journal" data-page="journal"><svg class="ic"><use href="#i-activity"/></svg><span>Журнал</span></a>
+      </nav>
+      <div class="sidebar-foot">
+        <div id="user-box" class="muted small"></div>
+        <button id="logout-btn" class="btn ghost">Выйти</button>
+      </div>
+    </aside>
+    <main id="main" class="main" tabindex="-1">
+      <div class="page-loading"><span class="spinner"></span> Загрузка…</div>
+    </main>
+  </div>
 </div>
 
-<div id="toast" class="toast hidden"></div>
+<!-- Модальное окно (формы и подтверждения) -->
+<div id="modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <h3 id="modal-title"></h3>
+    <div id="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn" id="modal-cancel">Отмена</button>
+      <button class="btn primary" id="modal-ok">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden" role="status"></div>
 
 <script src="/static/app.js"></script>
 </body>

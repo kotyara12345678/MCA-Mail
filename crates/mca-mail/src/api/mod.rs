@@ -32,6 +32,10 @@ pub struct ApiState {
     pub admin: Option<AdminCredentials>,
     /// Read-only configuration snapshot for the admin summary page.
     pub config: Option<Arc<AppConfig>>,
+    /// The mail reader's wake-up channel, set once the workers are spawned.
+    /// `None` in tests and in deployments without a mail loop — the panel's
+    /// "check mail now" then reports the reader as unavailable.
+    pub sync: std::sync::RwLock<Option<crate::application::workers::MailSync>>,
 }
 
 impl ApiState {
@@ -42,6 +46,7 @@ impl ApiState {
             start_time: tokio::time::Instant::now(),
             admin: None,
             config: None,
+            sync: std::sync::RwLock::new(None),
         }
     }
 
@@ -55,6 +60,12 @@ impl ApiState {
     pub fn with_config(mut self, config: Arc<AppConfig>) -> Self {
         self.config = Some(config);
         self
+    }
+
+    /// Hand the panel a way to wake the mailbox reader on demand.
+    /// Takes `&self` because production wires it after `spawn_all` has run.
+    pub fn set_sync(&self, sync: crate::application::workers::MailSync) {
+        *self.sync.write().unwrap_or_else(|e| e.into_inner()) = Some(sync);
     }
 }
 

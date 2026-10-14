@@ -55,6 +55,11 @@ async fn main() -> anyhow::Result<()> {
     )
     .await;
 
+    // The panel's "check mail now" button wakes the reader through this.
+    if let Some(sync) = workers.sync.clone() {
+        app.state.set_sync(sync);
+    }
+
     // Build and start the HTTP server
     let router = mca_mail::api::build_router(&app.config.api, app.state.clone());
 
