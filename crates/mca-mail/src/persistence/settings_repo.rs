@@ -19,6 +19,24 @@ pub struct SettingRow {
 pub const AUTOMATION_ENABLED: &str = "automation.global_enabled";
 pub const RETENTION_ENABLED: &str = "retention.enabled";
 
+/// Pipeline switches the admin panel flips without a restart. Read on every
+/// worker tick; `true` means the loop skips its work for that round.
+pub const POLL_PAUSED: &str = "pipeline.poll_paused";
+pub const QUEUE_PAUSED: &str = "pipeline.queue_paused";
+pub const OUTBOX_PAUSED: &str = "pipeline.outbox_paused";
+
+/// Read a pause switch; any error (or an unset key) means "running", because
+/// a broken settings table must not silently stop the mail flow.
+pub async fn is_paused(pool: &PgPool, key: &str) -> bool {
+    match get_bool(pool, key).await {
+        Ok(flag) => flag.unwrap_or(false),
+        Err(e) => {
+            tracing::warn!(error = %e, key, "failed to read pause switch; treating as running");
+            false
+        }
+    }
+}
+
 pub async fn all(pool: &PgPool) -> Result<Vec<SettingRow>, AppError> {
     let rows = sqlx::query_as::<_, SettingRow>(
         "SELECT key, value, description, updated_by, updated_at FROM system_settings \

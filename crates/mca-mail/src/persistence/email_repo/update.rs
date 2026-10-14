@@ -106,6 +106,22 @@ pub async fn raise_order_flag(pool: &PgPool, id: EmailId) -> Result<(), AppError
     Ok(())
 }
 
+/// Requeue a message for a fresh run: back to `pending`, attempts cleared.
+///
+/// A row that is currently `processing` is left alone — its worker owns the
+/// state machine, and flipping it mid-flight would let a second worker claim
+/// the same email. The UPDATE is still idempotent, so double clicks are safe.
+pub async fn requeue(pool: &PgPool, id: EmailId) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE emails SET status = 'pending', attempts = 0, last_error = NULL \
+         WHERE id = $1 AND status <> 'processing'",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Record a failed attempt and return the new attempt counter (retry telemetry).
 pub async fn record_error(pool: &PgPool, id: EmailId, error: &str) -> Result<i32, AppError> {
     let attempts = sqlx::query_scalar(

@@ -3,6 +3,7 @@
 //! Every agent talks to the model through this trait. Concrete implementations
 //! handle transport, retries, circuit breaking, and cost tracking.
 
+pub mod dynamic;
 pub mod mock;
 pub mod openai;
 
@@ -123,5 +124,27 @@ pub fn build(settings: &crate::config::LlmSettings) -> Result<ProviderHandle, Ll
             }
             Ok(Arc::new(openai::OpenAiProvider::new(settings)))
         }
+    }
+}
+
+/// Factory with runtime-switchable profiles: the environment provider keeps
+/// working as the base, and an active `llm_profiles` row overrides it for
+/// seconds-at-a-time without a restart (see [`dynamic`]).
+///
+/// The mock provider is never wrapped — test traffic must stay deterministic
+/// and must not touch the database.
+pub fn build_with_profiles(
+    settings: &crate::config::LlmSettings,
+    pool: Option<sqlx::PgPool>,
+) -> Result<ProviderHandle, LlmError> {
+    let base = build(settings)?;
+    let wrappable = !matches!(settings.provider, crate::config::LlmProviderKind::Mock);
+    match pool {
+        Some(pool) if wrappable => Ok(Arc::new(dynamic::DynamicProvider::new(
+            base,
+            settings.clone(),
+            pool,
+        ))),
+        _ => Ok(base),
     }
 }

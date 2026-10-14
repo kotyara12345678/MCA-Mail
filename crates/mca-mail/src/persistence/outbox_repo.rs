@@ -407,3 +407,33 @@ pub async fn pending_count(pool: &PgPool) -> Result<i64, AppError> {
             .await?;
     Ok(total)
 }
+
+/// One send-queue row as the admin panel shows it (no bodies).
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
+pub struct OutboxSummary {
+    pub id: Uuid,
+    pub message_type: String,
+    pub recipient: String,
+    pub subject: String,
+    pub status: String,
+    pub attempts: i32,
+    pub max_attempts: i32,
+    pub next_attempt_at: chrono::DateTime<chrono::Utc>,
+    pub last_error: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub sent_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Recent rows from the send queue, newest first — the panel's "исходящие"
+/// view and the operations page.
+pub async fn recent(pool: &PgPool, limit: i64) -> Result<Vec<OutboxSummary>, AppError> {
+    let rows = sqlx::query_as::<_, OutboxSummary>(
+        "SELECT id, message_type, recipient, subject, status, attempts, max_attempts, \
+         next_attempt_at, last_error, created_at, sent_at \
+         FROM mailbox_outbox ORDER BY created_at DESC, id DESC LIMIT $1",
+    )
+    .bind(limit.clamp(1, 200))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}

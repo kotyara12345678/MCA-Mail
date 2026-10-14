@@ -14,7 +14,7 @@ use crate::domain::InboundMessage;
 use crate::error::AppError;
 use crate::mail::MailProvider;
 use crate::observability::{lifecycle, queue};
-use crate::persistence::{email_repo, thread_repo};
+use crate::persistence::{email_repo, settings_repo, thread_repo};
 
 /// One poll cycle: establish the boundary, fetch only mail after it, store it,
 /// and only then advance the boundary. Processing is left to the queue loop so
@@ -28,6 +28,13 @@ pub async fn poll_once(
     pool: &PgPool,
     mailbox: &str,
 ) -> Result<(), AppError> {
+    // Admin panel pause: no fetch, no cursor movement — the cycle is skipped
+    // as if it never fired, so nothing is lost when the switch is flipped back.
+    if settings_repo::is_paused(pool, settings_repo::POLL_PAUSED).await {
+        info!(mailbox, "fetch paused by admin; skipping cycle");
+        return Ok(());
+    }
+
     queue::poll_started(mailbox);
     let started = Instant::now();
 

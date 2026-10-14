@@ -12,12 +12,12 @@ mod write;
 pub use attachments::{attachments, insert_attachments, purge_attachment_text};
 pub use dedup::{dedup_key_for, scoped_dedup_key_for};
 pub use query::{
-    claim_batch, count, find, get, list, spam_verdict, thread_has_order, thread_messages,
-    EmailFilter,
+    claim_batch, count, find, get, list, spam_verdict, status_counts, thread_has_order,
+    thread_messages, EmailFilter,
 };
 pub use update::{
-    anonymize, attach_lead, raise_order_flag, record_error, set_category, set_classification,
-    set_spam_verdict, set_status,
+    anonymize, attach_lead, raise_order_flag, record_error, requeue, set_category,
+    set_classification, set_spam_verdict, set_status,
 };
 
 pub use write::{insert_inbound, InsertOutcome};

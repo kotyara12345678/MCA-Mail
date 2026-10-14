@@ -15,6 +15,10 @@ pub const APP: &[(&str, &str)] = &[
     ("API_REQUEST_TIMEOUT_SECONDS", "api.request_timeout_seconds"),
     ("API_MAX_PAGE_SIZE", "api.max_page_size"),
     ("API_DEFAULT_PAGE_SIZE", "api.default_page_size"),
+    // Admin panel login. Both fall back to the mailbox credentials when
+    // unset, so the panel shares one login/password with the mail client.
+    ("ADMIN_LOGIN", "api.admin_login"),
+    ("ADMIN_PASSWORD", "api.admin_password"),
 ];
 
 pub const AGENTS: &[(&str, &str)] = &[

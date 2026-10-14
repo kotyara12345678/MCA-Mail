@@ -172,8 +172,8 @@ pub async fn agent_statistics(pool: &PgPool) -> Result<Vec<AgentStats>, AppError
          count(*) AS total, \
          count(*) FILTER (WHERE state = 'succeeded') AS succeeded, \
          count(*) FILTER (WHERE state = 'failed') AS failed, \
-         COALESCE(sum(prompt_tokens + completion_tokens), 0) AS tokens, \
-         COALESCE(sum(cost_micros_usd), 0) AS cost_micros_usd, \
+         COALESCE(sum(prompt_tokens + completion_tokens), 0)::bigint AS tokens, \
+         COALESCE(sum(cost_micros_usd), 0)::bigint AS cost_micros_usd, \
          COALESCE(avg(duration_ms), 0)::bigint AS avg_duration_ms \
          FROM agent_runs GROUP BY agent ORDER BY agent",
     )
@@ -195,18 +195,91 @@ pub struct AgentStats {
 
 /// Cost incurred since a point in time, used by the budget guard.
 pub async fn cost_since(pool: &PgPool, since: chrono::DateTime<Utc>) -> Result<i64, AppError> {
-    let total: Option<i64> =
-        sqlx::query_scalar("SELECT sum(cost_micros_usd) FROM agent_runs WHERE started_at >= $1")
-            .bind(since)
-            .fetch_one(pool)
-            .await?;
+    let total: Option<i64> = sqlx::query_scalar(
+        "SELECT sum(cost_micros_usd)::bigint FROM agent_runs WHERE started_at >= $1",
+    )
+    .bind(since)
+    .fetch_one(pool)
+    .await?;
     Ok(total.unwrap_or(0))
 }
 
 /// Confirm that a lead is still inside its cost budget before an LLM call.
 pub async fn total_cost(pool: &PgPool) -> Result<i64, AppError> {
-    let total: Option<i64> = sqlx::query_scalar("SELECT sum(cost_micros_usd) FROM agent_runs")
-        .fetch_one(pool)
-        .await?;
+    let total: Option<i64> =
+        sqlx::query_scalar("SELECT sum(cost_micros_usd)::bigint FROM agent_runs")
+            .fetch_one(pool)
+            .await?;
     Ok(total.unwrap_or(0))
+}
+
+/// One day of token/cost usage, backing the panel's cost page.
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
+pub struct DayUsage {
+    pub day: chrono::NaiveDate,
+    pub calls: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub cost_micros_usd: i64,
+}
+
+/// Daily roll-up for the last `days` days (UTC), newest first. Days without
+/// calls are simply absent — the panel renders them as gaps.
+pub async fn usage_by_day(pool: &PgPool, days: i32) -> Result<Vec<DayUsage>, AppError> {
+    let rows = sqlx::query_as::<_, DayUsage>(
+        "SELECT date_trunc('day', started_at)::date AS day, count(*) AS calls, \
+         COALESCE(sum(prompt_tokens), 0)::bigint AS prompt_tokens, \
+         COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens, \
+         COALESCE(sum(cost_micros_usd), 0)::bigint AS cost_micros_usd \
+         FROM agent_runs WHERE started_at > now() - make_interval(days => $1) \
+         GROUP BY 1 ORDER BY 1 DESC",
+    )
+    .bind(days.clamp(1, 365))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// One model's usage over a window.
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
+pub struct ModelUsage {
+    pub model: String,
+    pub calls: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub cost_micros_usd: i64,
+}
+
+pub async fn usage_by_model(pool: &PgPool, days: i32) -> Result<Vec<ModelUsage>, AppError> {
+    let rows = sqlx::query_as::<_, ModelUsage>(
+        "SELECT model, count(*) AS calls, \
+         COALESCE(sum(prompt_tokens), 0)::bigint AS prompt_tokens, \
+         COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens, \
+         COALESCE(sum(cost_micros_usd), 0)::bigint AS cost_micros_usd \
+         FROM agent_runs WHERE started_at > now() - make_interval(days => $1) \
+         GROUP BY model ORDER BY cost_micros_usd DESC, model",
+    )
+    .bind(days.clamp(1, 365))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Agent runs belonging to one email — the panel's per-message trace.
+pub async fn agent_runs_for_email(
+    pool: &PgPool,
+    email_id: Uuid,
+    limit: i64,
+) -> Result<Vec<AgentRunSummary>, AppError> {
+    let rows = sqlx::query_as::<_, AgentRunSummary>(
+        "SELECT id, run_id, email_id, agent, model, state, iterations, tool_calls, \
+         prompt_tokens, completion_tokens, cost_micros_usd, duration_ms, error, started_at, \
+         finished_at FROM agent_runs WHERE email_id = $1 \
+         ORDER BY started_at DESC, id DESC LIMIT $2",
+    )
+    .bind(email_id)
+    .bind(limit.clamp(1, 200))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }

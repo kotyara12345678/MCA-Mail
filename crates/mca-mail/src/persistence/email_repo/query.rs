@@ -17,6 +17,11 @@ pub struct EmailFilter<'a> {
     pub category: Option<EmailCategory>,
     pub from_address: Option<&'a str>,
     pub lead_id: Option<Uuid>,
+    /// Only rows that carry the red flag (`true`), or only those without
+    /// (`false`); `None` keeps both.
+    pub flagged: Option<bool>,
+    /// Case-insensitive substring over subject and sender.
+    pub search: Option<&'a str>,
     pub limit: i64,
     pub offset: i64,
 }
@@ -34,7 +39,10 @@ impl EmailFilter<'_> {
 const LIST_PREDICATE: &str = "WHERE ($1::text IS NULL OR status = $1) \
      AND ($2::text IS NULL OR category = $2) \
      AND ($3::text IS NULL OR from_address = $3) \
-     AND ($4::uuid IS NULL OR lead_id = $4)";
+     AND ($4::uuid IS NULL OR lead_id = $4) \
+     AND ($5::bool IS NULL OR order_flag = $5) \
+     AND ($6::text IS NULL OR subject ILIKE '%' || $6 || '%' \
+          OR from_address ILIKE '%' || $6 || '%')";
 
 pub async fn list(
     pool: &PgPool,
@@ -43,18 +51,28 @@ pub async fn list(
     let sql = format!(
         "SELECT id, thread_id, status, category, spam_verdict, from_address, from_name, \
          subject, order_flag, received_at, lead_id, size_bytes, attempts, last_error FROM emails \
-         {LIST_PREDICATE} ORDER BY received_at DESC, id DESC LIMIT $5 OFFSET $6"
+         {LIST_PREDICATE} ORDER BY received_at DESC, id DESC LIMIT $7 OFFSET $8"
     );
     let rows = sqlx::query_as::<_, EmailSummaryRow>(&sql)
         .bind(filter.status_text())
         .bind(filter.category_text())
         .bind(filter.from_address)
         .bind(filter.lead_id)
+        .bind(filter.flagged)
+        .bind(normalized_search(filter.search))
         .bind(filter.limit.clamp(1, 500))
         .bind(filter.offset.max(0))
         .fetch_all(pool)
         .await?;
     Ok(rows)
+}
+
+/// An empty search box must not turn into `'%%'` (which matches everything
+/// anyway, but only after defeating the index plan the NULL branch avoids).
+fn normalized_search(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 pub async fn count(pool: &PgPool, filter: &EmailFilter<'_>) -> Result<i64, AppError> {
@@ -64,9 +82,21 @@ pub async fn count(pool: &PgPool, filter: &EmailFilter<'_>) -> Result<i64, AppEr
         .bind(filter.category_text())
         .bind(filter.from_address)
         .bind(filter.lead_id)
+        .bind(filter.flagged)
+        .bind(normalized_search(filter.search))
         .fetch_one(pool)
         .await?;
     Ok(total)
+}
+
+/// Per-status row counts for the admin dashboard, as `(status, count)` pairs.
+pub async fn status_counts(pool: &PgPool) -> Result<Vec<(String, i64)>, AppError> {
+    let rows = sqlx::query_as::<_, (String, i64)>(
+        "SELECT status, count(*) FROM emails GROUP BY status ORDER BY status",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }
 
 pub async fn find(pool: &PgPool, id: EmailId) -> Result<Option<StoredEmail>, AppError> {

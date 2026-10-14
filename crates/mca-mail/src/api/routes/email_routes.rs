@@ -2,18 +2,17 @@
 
 use axum::{
     extract::{Path, Query, State},
-    routing::{get, post},
+    routing::get,
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::api::auth::{AuthError, AuthenticatedRequest};
+use crate::api::auth::AuthenticatedRequest;
 use crate::api::ApiState;
 use crate::domain::{EmailCategory, EmailId, EmailStatus, StoredEmail};
 use crate::error::AppError;
-use crate::persistence::api_key_repo::Role;
 use crate::persistence::email_repo::{self, EmailFilter};
 
 #[derive(Serialize)]
@@ -60,15 +59,19 @@ struct ThreadResponse {
 }
 
 #[derive(Serialize)]
-struct ActionResponse {
-    success: bool,
-    message: String,
+pub struct ActionResponse {
+    pub success: bool,
+    pub message: String,
 }
 
 #[derive(Deserialize)]
 struct EmailListQuery {
     status: Option<String>,
     category: Option<String>,
+    /// `true` / `false` — only red-flagged, or only unflagged.
+    flagged: Option<bool>,
+    /// Case-insensitive substring over subject and sender.
+    search: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
 }
@@ -95,6 +98,8 @@ async fn list_emails(
     let filter = EmailFilter {
         status: query.status.as_deref().map(parse_status).transpose()?,
         category: query.category.as_deref().map(parse_category).transpose()?,
+        flagged: query.flagged,
+        search: query.search.as_deref(),
         limit: query.limit.unwrap_or(DEFAULT_PAGE),
         offset: query.offset.unwrap_or(0),
         ..Default::default()
@@ -172,61 +177,10 @@ fn detail_of(email: StoredEmail) -> EmailDetailResponse {
     }
 }
 
-async fn reprocess_email(
-    State(_state): State<Arc<ApiState>>,
-    Path(id): Path<Uuid>,
-    auth: AuthenticatedRequest,
-) -> Result<Json<ActionResponse>, AuthError> {
-    auth.require(Role::Operator)?;
-    Ok(Json(ActionResponse {
-        success: true,
-        message: format!("reprocessing scheduled for {id}"),
-    }))
-}
-
-async fn review_email(
-    State(_state): State<Arc<ApiState>>,
-    Path(id): Path<Uuid>,
-    auth: AuthenticatedRequest,
-) -> Result<Json<ActionResponse>, AuthError> {
-    auth.require(Role::Operator)?;
-    Ok(Json(ActionResponse {
-        success: true,
-        message: format!("email {id} flagged for review"),
-    }))
-}
-
-async fn approve_email(
-    State(_state): State<Arc<ApiState>>,
-    Path(id): Path<Uuid>,
-    auth: AuthenticatedRequest,
-) -> Result<Json<ActionResponse>, AuthError> {
-    auth.require(Role::Manager)?;
-    Ok(Json(ActionResponse {
-        success: true,
-        message: format!("email {id} approved"),
-    }))
-}
-
-async fn reject_email(
-    State(_state): State<Arc<ApiState>>,
-    Path(id): Path<Uuid>,
-    auth: AuthenticatedRequest,
-) -> Result<Json<ActionResponse>, AuthError> {
-    auth.require(Role::Manager)?;
-    Ok(Json(ActionResponse {
-        success: true,
-        message: format!("email {id} rejected"),
-    }))
-}
-
 pub fn routes() -> Router<Arc<ApiState>> {
     Router::new()
         .route("/api/v1/emails", get(list_emails))
         .route("/api/v1/emails/{id}", get(get_email))
         .route("/api/v1/emails/{id}/thread", get(get_thread))
-        .route("/api/v1/emails/{id}/reprocess", post(reprocess_email))
-        .route("/api/v1/emails/{id}/review", post(review_email))
-        .route("/api/v1/emails/{id}/approve", post(approve_email))
-        .route("/api/v1/emails/{id}/reject", post(reject_email))
+        .merge(super::email_actions::routes())
 }

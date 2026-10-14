@@ -21,6 +21,11 @@ pub struct ApiSettings {
     pub request_timeout_seconds: u64,
     pub max_page_size: i64,
     pub default_page_size: i64,
+    /// Admin panel login. Empty means "fall back to the mailbox username",
+    /// so out of the box the panel shares one login/password with mail.
+    pub admin_login: String,
+    /// Admin panel password. Empty means "fall back to the mailbox password".
+    pub admin_password: Secret,
 }
 
 impl Default for ApiSettings {
@@ -34,6 +39,8 @@ impl Default for ApiSettings {
             request_timeout_seconds: 30,
             max_page_size: 200,
             default_page_size: 50,
+            admin_login: String::new(),
+            admin_password: Secret::empty(),
         }
     }
 }

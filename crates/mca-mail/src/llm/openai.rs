@@ -51,6 +51,79 @@ impl OpenAiProvider {
             client,
         }
     }
+
+    /// Assemble the wire request from the tier request: system prompt folded,
+    /// max_tokens defaulting to the configured cap, JSON mode when enabled.
+    fn build_request(&self, req: &LlmRequest) -> ChatRequest {
+        let (system_content, messages) = wire_messages(req);
+        let mut api_messages = Vec::with_capacity(messages.len() + 1);
+        if !system_content.is_empty() {
+            api_messages.push(Message {
+                role: "system".into(),
+                content: system_content,
+            });
+        }
+        api_messages.extend(messages);
+
+        let mut chat_req = ChatRequest {
+            model: req.model.clone(),
+            messages: api_messages,
+            max_tokens: if req.max_tokens > 0 {
+                req.max_tokens
+            } else {
+                self.max_tokens
+            },
+            temperature: req.temperature,
+            response_format: None,
+        };
+        if self.json_mode && req.response_schema.is_some() {
+            chat_req.response_format = Some(ResponseFormat {
+                type_: "json_object".into(),
+            });
+        }
+        chat_req
+    }
+
+    /// Perform exactly one HTTP call and classify the outcome for `chat`.
+    async fn send_attempt(&self, url: &str, chat_req: &ChatRequest) -> Attempt {
+        let response = match self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(chat_req)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                return Attempt::Retryable(transport_error(error, self.timeout_seconds));
+            }
+        };
+
+        let status = response.status();
+        if status.is_success() {
+            return match response.json::<ChatResponse>().await {
+                Ok(data) => Attempt::Success(data),
+                Err(error) => {
+                    Attempt::Retryable(LlmError::Malformed(format!("JSON parse: {error}")))
+                }
+            };
+        }
+
+        // 429 and 5xx are transient; every other status is the caller's fault
+        // (bad key, bad request) and will not improve on retry.
+        let body = response.text().await.unwrap_or_default();
+        let error = LlmError::Http {
+            status: status.as_u16(),
+            detail: body,
+        };
+        if status.as_u16() == 429 || status.as_u16() >= 500 {
+            Attempt::Retryable(error)
+        } else {
+            Attempt::Fatal(error)
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -108,63 +181,74 @@ fn report_llm_failed(provider: &OpenAiProvider, model: &str, err: &LlmError, ret
     );
 }
 
+/// Fold `req.system_prompt` with a leading `system` message (if any) into one
+/// system prompt, and convert the remaining messages to the wire shape.
+fn wire_messages(req: &LlmRequest) -> (String, Vec<Message>) {
+    let mut system_content = req.system_prompt.clone();
+    let mut messages = Vec::with_capacity(req.messages.len());
+    if let Some(first) = req.messages.first() {
+        if first.role == LlmRole::System {
+            system_content = format!("{}\n\n{}", system_content, first.content);
+            messages.extend(req.messages.iter().skip(1));
+        } else {
+            messages.extend(req.messages.iter());
+        }
+    }
+    let api_messages = messages
+        .into_iter()
+        .map(|m| Message {
+            role: role_str(m.role),
+            content: m.content.clone(),
+        })
+        .collect();
+    (system_content, api_messages)
+}
+
+/// One HTTP attempt, classified for the retry loop: a parsed body, an error
+/// worth retrying, or a client-side error that fails immediately.
+enum Attempt {
+    Success(ChatResponse),
+    Retryable(LlmError),
+    Fatal(LlmError),
+}
+
+/// Map a `reqwest` transport failure onto the error taxonomy.
+fn transport_error(error: reqwest::Error, timeout_seconds: u64) -> LlmError {
+    if error.is_timeout() {
+        LlmError::Timeout(timeout_seconds * 1000)
+    } else if error.is_connect() {
+        LlmError::Unavailable(error.to_string())
+    } else {
+        LlmError::Internal(error.to_string())
+    }
+}
+
+/// Turn a successful API body into the response the orchestrator sees.
+fn parse_success(data: ChatResponse, model: &str) -> LlmResponse {
+    let content = data
+        .choices
+        .first()
+        .and_then(|c| c.message.content.clone())
+        .unwrap_or_default();
+    let (prompt_tokens, completion_tokens) = data
+        .usage
+        .map(|u| (u.prompt_tokens, u.completion_tokens))
+        .unwrap_or((0, 0));
+    LlmResponse {
+        content,
+        prompt_tokens,
+        completion_tokens,
+        model: model.to_string(),
+    }
+}
+
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn chat(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
         let url = format!("{}/chat/completions", self.base_url);
-
-        let mut messages = Vec::with_capacity(req.messages.len() + 1);
-
-        let mut system_content = req.system_prompt.clone();
-        if !req.messages.is_empty() {
-            if let Some(first) = req.messages.first() {
-                if first.role == LlmRole::System {
-                    system_content = format!("{}\n\n{}", system_content, first.content);
-                    messages.extend(req.messages.iter().skip(1).map(|m| Message {
-                        role: role_str(m.role),
-                        content: m.content.clone(),
-                    }));
-                } else {
-                    messages.extend(req.messages.iter().map(|m| Message {
-                        role: role_str(m.role),
-                        content: m.content.clone(),
-                    }));
-                }
-            }
-        }
-
-        let api_messages = if !system_content.is_empty() {
-            let mut msgs = vec![Message {
-                role: "system".into(),
-                content: system_content,
-            }];
-            msgs.extend(messages);
-            msgs
-        } else {
-            messages
-        };
-
-        let model_used = req.model.clone();
-        let mut chat_req = ChatRequest {
-            model: model_used,
-            messages: api_messages,
-            max_tokens: if req.max_tokens > 0 {
-                req.max_tokens
-            } else {
-                self.max_tokens
-            },
-            temperature: req.temperature,
-            response_format: None,
-        };
-
-        if self.json_mode && req.response_schema.is_some() {
-            chat_req.response_format = Some(ResponseFormat {
-                type_: "json_object".into(),
-            });
-        }
-
-        let mut last_error: Option<LlmError> = None;
+        let chat_req = self.build_request(&req);
         let max_attempts = (self.max_retries + 1) as usize;
+        let mut last_error: Option<LlmError> = None;
 
         for attempt in 0..max_attempts {
             if attempt > 0 {
@@ -182,79 +266,19 @@ impl LlmProvider for OpenAiProvider {
                 tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
             }
 
-            match self
-                .client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .json(&chat_req)
-                .send()
-                .await
-            {
-                Ok(resp) => {
-                    let status = resp.status();
-                    if status.is_success() {
-                        match resp.json::<ChatResponse>().await {
-                            Ok(data) => {
-                                let content = data
-                                    .choices
-                                    .first()
-                                    .and_then(|c| c.message.content.clone())
-                                    .unwrap_or_default();
-
-                                let (prompt, completion) = data
-                                    .usage
-                                    .map(|u| (u.prompt_tokens, u.completion_tokens))
-                                    .unwrap_or((0, 0));
-
-                                return Ok(LlmResponse {
-                                    content,
-                                    prompt_tokens: prompt,
-                                    completion_tokens: completion,
-                                    model: req.model.clone(),
-                                });
-                            }
-                            Err(e) => {
-                                let err = LlmError::Malformed(format!("JSON parse: {e}"));
-                                if attempt == max_attempts - 1 {
-                                    report_llm_failed(self, &chat_req.model, &err, attempt as u32);
-                                    return Err(err);
-                                }
-                                last_error = Some(err);
-                                continue;
-                            }
-                        }
-                    } else if status.as_u16() == 429 || status.as_u16() >= 500 {
-                        let body = resp.text().await.unwrap_or_default();
-                        last_error = Some(LlmError::Http {
-                            status: status.as_u16(),
-                            detail: body,
-                        });
-                        continue;
-                    } else {
-                        let body = resp.text().await.unwrap_or_default();
-                        let err = LlmError::Http {
-                            status: status.as_u16(),
-                            detail: body,
-                        };
-                        report_llm_failed(self, &chat_req.model, &err, attempt as u32);
-                        return Err(err);
-                    }
+            let final_attempt = attempt == max_attempts - 1;
+            match self.send_attempt(&url, &chat_req).await {
+                Attempt::Success(data) => return Ok(parse_success(data, &req.model)),
+                Attempt::Fatal(err) => {
+                    report_llm_failed(self, &chat_req.model, &err, attempt as u32);
+                    return Err(err);
                 }
-                Err(e) => {
-                    let err = if e.is_timeout() {
-                        LlmError::Timeout(self.timeout_seconds * 1000)
-                    } else if e.is_connect() {
-                        LlmError::Unavailable(e.to_string())
-                    } else {
-                        LlmError::Internal(e.to_string())
-                    };
-                    if attempt == max_attempts - 1 {
+                Attempt::Retryable(err) => {
+                    if final_attempt {
                         report_llm_failed(self, &chat_req.model, &err, attempt as u32);
                         return Err(err);
                     }
                     last_error = Some(err);
-                    continue;
                 }
             }
         }

@@ -245,6 +245,15 @@ pub async fn pending_approval(pool: &PgPool, limit: i64) -> Result<Vec<EmailDraf
     .await
 }
 
+/// How many drafts are waiting for a human decision (dashboard counter).
+pub async fn pending_approval_count(pool: &PgPool) -> Result<i64, AppError> {
+    let total: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM email_drafts WHERE status = 'pending_approval'")
+            .fetch_one(pool)
+            .await?;
+    Ok(total)
+}
+
 /// Count of messages already sent to a recipient in the trailing window.
 pub async fn sends_since(
     pool: &PgPool,

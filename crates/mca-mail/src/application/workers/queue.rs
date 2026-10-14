@@ -9,7 +9,7 @@ use tracing::{error, info};
 
 use crate::observability::queue;
 use crate::orchestration::Orchestrator;
-use crate::persistence::email_repo;
+use crate::persistence::{email_repo, settings_repo};
 use crate::shutdown::{stopping, Rx};
 
 /// Claim and process pending emails, `concurrency` at a time.
@@ -27,6 +27,11 @@ pub async fn queue_loop(pool: PgPool, orchestrator: Arc<Orchestrator>, mut shutd
         tokio::select! {
             _ = stopping(&mut shutdown) => break,
             _ = ticker.tick() => {}
+        }
+        // Admin panel pause: claim nothing, so already-claimed rows finish
+        // naturally and new work waits at `pending`.
+        if settings_repo::is_paused(&pool, settings_repo::QUEUE_PAUSED).await {
+            continue;
         }
         let batch = match email_repo::claim_batch(&pool, concurrency, max_attempts).await {
             Ok(b) if b.is_empty() => continue,

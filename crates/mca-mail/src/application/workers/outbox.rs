@@ -48,6 +48,11 @@ pub async fn outbox_loop(
             _ = stopping(&mut shutdown) => break,
             _ = ticker.tick() => {}
         }
+        // Admin panel pause: deliver nothing. Queued rows keep their place,
+        // so delivery resumes exactly where it stopped.
+        if settings_repo::is_paused(&pool, settings_repo::OUTBOX_PAUSED).await {
+            continue;
+        }
         // A row left in `sending` by a process that died belongs back in the
         // queue; without this it would sit there for ever.
         match outbox_repo::release_stale(&pool, CLAIM_TIMEOUT_SECONDS).await {
