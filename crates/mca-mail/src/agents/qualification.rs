@@ -66,7 +66,6 @@ Extract what information is available:
 - Company name, contact person, phone
 - Type of request (transport, customs, procurement, full_import)
 - Cargo details if mentioned (weight, volume, origin, destination)
-- Whether the client needs expert advice
 
 Every extracted value goes into "requirements" as an object:
 {"field": "<field_name>", "value": "<verbatim value or null>", "state": "known|unknown|not_applicable|needs_confirmation", "unit": "<optional>", "confidence": 0.0-1.0, "evidence": "<exact span from the email that supports the value>"}
@@ -91,7 +90,10 @@ Rules:
   extraction, all of them at once, so the reply can ask for the whole lot in
   a single message. Never repeat a question that appears in the "already
   asked" list below.
-- If the email asks for a phone call, set needs_expert=true.
+- Set needs_expert=true ONLY when the customer explicitly asks to speak with
+  a person: a phone call, a callback, "call me", "I want to talk to your
+  manager". Asking for a quote, a price, a timeline or more information is
+  NOT needs_expert — that is answered in the normal dialogue.
 
 Respond with JSON: {"lead_id": null, "first_email_id": null, "company_name": null, "contact_name": null, "contact_phone": null, "summary": "", "scope": "transport|customs|procurement|full_import", "needs_expert": false, "questions": [], "confidence": 0.0, "regulated_topics": [], "requirements": []}"#;
 

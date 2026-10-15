@@ -85,15 +85,37 @@ impl Orchestrator {
         }
 
         // Qualification off (or no usable lead) means the pipeline ends here.
-        let Some((lead_id, company_name)) = self
+        let Some((lead_id, company_name, needs_expert)) = self
             .phase_qualification(corr, &ctx_builder, run_id, email_id, thread, category)
             .await?
         else {
             return Ok(EmailStatus::Processed);
         };
 
-        self.phase_communication(corr, &ctx_builder, run_id, email_id, lead_id, company_name)
+        self.phase_communication(
+            corr,
+            &ctx_builder,
+            run_id,
+            email_id,
+            lead_id,
+            company_name.clone(),
+        )
+        .await?;
+
+        // A customer who asked for a person is answered first, then handed
+        // over: the lock a handoff applies starts with the next turn, so the
+        // reply produced in this one always leaves the building.
+        if needs_expert && self.config.agents.handoff {
+            let handoff_ctx = ctx_builder.build_for(AgentKind::Handoff).await?;
+            self.phase_handoff(
+                corr,
+                &handoff_ctx,
+                lead_id,
+                company_name,
+                Some("callback_requested"),
+            )
             .await?;
+        }
         Ok(EmailStatus::Processed)
     }
 }

@@ -517,3 +517,78 @@ async fn one_inbound_email_queues_exactly_one_reply() {
         "a replayed message must not queue a second reply"
     );
 }
+
+/// A customer who asks for a call is answered in the same turn that hands the
+/// lead over: the lock a handoff applies starts with the next turn, so the
+/// acknowledgement produced here must still reach the outbox.
+#[tokio::test]
+async fn a_callback_request_is_answered_before_the_lead_is_locked() {
+    let _guard = SERIAL.lock().await;
+    let pool = setup_db().await;
+    let llm = Arc::new(MockLlmProvider::new(&mock_llm_settings()));
+    let mut qualification = qualification_partial();
+    qualification["needs_expert"] = serde_json::json!(true);
+    qualification["contact_phone"] = serde_json::json!("+7 900 123-45-67");
+    stub_pipeline(&llm, &qualification, &reply_asking());
+    llm.stub_json(
+        "handoff agent for MCA Logistics",
+        &serde_json::json!({
+            "reason": "phone call requested",
+            "priority": 50,
+            "cargo_summary": "станки",
+            "route_summary": "Шэньчжэнь — Москва",
+            "requested_service": "transport",
+            "missing_information": ["вес", "объём"],
+            "open_questions": [],
+            "conversation_digest": "клиент просит позвонить",
+            "checks_performed": [],
+            "unresolved_topics": [],
+            "original_request": "перевезти станки, позвоните мне"
+        }),
+    );
+    let orch = build_orchestrator(auto_config(), pool.clone(), llm as Arc<dyn LlmProvider>);
+
+    let buyer = format!("caller-{}@example.com", uuid::Uuid::new_v4());
+    let id = ingest(
+        &pool,
+        &email(
+            &buyer,
+            &format!("Звонок и станки {}", uuid::Uuid::new_v4()),
+            "Нужно перевезти станки из Шэньчжэня в Москву, позвоните мне",
+        ),
+    )
+    .await;
+    orch.process_email(id).await.expect("process");
+
+    let lead_id = email_repo::get(&pool, id)
+        .await
+        .expect("get")
+        .lead_id
+        .expect("a lead must open");
+    assert_eq!(
+        outbox_for_lead(&pool, lead_id).await,
+        vec![(
+            "customer_reply".to_string(),
+            buyer.clone(),
+            "queued".to_string()
+        )],
+        "the same turn's reply must reach the outbox before any lock"
+    );
+
+    let locked: bool = sqlx::query_scalar("SELECT automation_locked FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(&pool)
+        .await
+        .expect("lead");
+    assert!(
+        locked,
+        "the callback handoff locks the lead from the next turn"
+    );
+    let handoffs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM human_handoffs WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(&pool)
+            .await
+            .expect("handoffs");
+    assert_eq!(handoffs, 1, "the manager gets exactly one open handoff");
+}

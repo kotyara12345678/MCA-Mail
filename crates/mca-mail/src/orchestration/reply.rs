@@ -17,9 +17,9 @@ use crate::persistence::{conversation_repo, email_repo, lead_repo, requirement_r
 use super::dialogue;
 
 impl Orchestrator {
-    /// Returns the lead plus its company name when qualification ran, or
-    /// `None` when the stage is switched off or the category may not carry a
-    /// commercial record.
+    /// Returns the lead, its company name and the model's "customer asked for
+    /// a person" flag when qualification ran, or `None` when the stage is
+    /// switched off or the category may not carry a commercial record.
     pub(super) async fn phase_qualification(
         &self,
         corr: &Correlation,
@@ -28,7 +28,7 @@ impl Orchestrator {
         email_id: &uuid::Uuid,
         thread: &EmailThread,
         category: EmailCategory,
-    ) -> Result<Option<(LeadId, Option<String>)>, AppError> {
+    ) -> Result<Option<(LeadId, Option<String>, bool)>, AppError> {
         if !self.config.agents.qualification {
             return Ok(None);
         }
@@ -106,21 +106,11 @@ impl Orchestrator {
         email_repo::attach_lead(&self.pool, *email_id, lead_id).await?;
         run_repo::set_lead(&self.pool, *run_id, lead_id).await?;
 
-        // "I want a call" is the customer asking for a person: lock the
-        // conversation to automation immediately rather than after a reply.
-        if output.needs_expert && self.config.agents.handoff {
-            let handoff_ctx = ctx_builder.build_for(AgentKind::Handoff).await?;
-            self.phase_handoff(
-                corr,
-                &handoff_ctx,
-                lead_id,
-                output.company_name.clone(),
-                Some("callback_requested"),
-            )
-            .await?;
-        }
-
-        Ok(Some((lead_id, output.company_name)))
+        // "I want a call" is returned, not acted on here: the pipeline hands
+        // over after this turn's reply has been planned, so the lock a handoff
+        // applies can never swallow the acknowledgement the customer is owed
+        // in the same turn.
+        Ok(Some((lead_id, output.company_name, output.needs_expert)))
     }
 
     /// Validate what the model produced, then write it through the existing

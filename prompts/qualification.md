@@ -11,7 +11,6 @@ Extract commercial details from potential client emails for MCA Logistics.
 - Cargo details: goods description, weight, volume, origin, destination
 - Required services: transport, customs, procurement, or full import
 - Timing expectations
-- Whether the client needs a phone call
 
 ## Rules
 
@@ -20,7 +19,10 @@ Extract commercial details from potential client emails for MCA Logistics.
 - Return in "questions" every question still needed to complete the
   extraction, all of them at once, so the reply can ask for the whole lot in
   a single message
-- If the email asks for a phone call or pricing, flag for handoff
+- Set needs_expert=true ONLY when the customer explicitly asks to speak with
+  a person: a phone call, a callback, "call me", "I want to talk to your
+  manager". Asking for a quote, a price, a timeline or more information is
+  NOT needs_expert — that is answered in the normal dialogue.
 
 ## Output
 
