@@ -101,6 +101,23 @@ jobs:
             echo '== runtime env from CI secret =='
             printf '%s\n' "$PROD_ENV" > "$ROOT/MCA-phone/prod/.env"
 
+            # Server-local overrides live in an untracked .env.local and win
+            # over the secret, so an operator can add a recipient or a switch
+            # on the box without editing the CI secret.
+            if [ -f "$ROOT/MCA-phone/prod/.env.local" ]; then
+              echo '== apply prod/.env.local overrides =='
+              while IFS= read -r line || [ -n "$line" ]; do
+                case "$line" in ''|'#'*) continue;; esac
+                case "$line" in [A-Z_]*=*) ;; *) continue;; esac
+                key="${line%%=*}"
+                if grep -q "^${key}=" "$ROOT/MCA-phone/prod/.env"; then
+                  sed -i "s|^${key}=.*|${line}|" "$ROOT/MCA-phone/prod/.env"
+                else
+                  printf '%s\n' "$line" >> "$ROOT/MCA-phone/prod/.env"
+                fi
+              done < "$ROOT/MCA-phone/prod/.env.local"
+            fi
+
             cd "$ROOT/MCA-phone"
             echo '== pull prebuilt images =='
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
