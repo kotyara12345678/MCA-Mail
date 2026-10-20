@@ -52,7 +52,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT }}
-          envs: PROD_ENV
+          envs: PROD_ENV, GHCR_USER, GHCR_TOKEN
           script: |
             set -e
             export DEBIAN_FRONTEND=noninteractive
@@ -103,6 +103,7 @@ jobs:
 
             cd "$ROOT/MCA-phone"
             echo '== pull prebuilt images =='
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             docker compose -f prod/docker-compose.yml pull
             echo '== up =='
             docker compose -f prod/docker-compose.yml up -d --remove-orphans
@@ -134,3 +135,5 @@ jobs:
             free -h | head -2
         env:
           PROD_ENV: ${{ secrets.PROD_ENV }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
