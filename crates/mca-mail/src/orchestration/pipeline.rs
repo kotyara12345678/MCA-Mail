@@ -102,9 +102,10 @@ impl Orchestrator {
         )
         .await?;
 
-        // A customer who asked for a person is answered first, then handed
-        // over: the lock a handoff applies starts with the next turn, so the
-        // reply produced in this one always leaves the building.
+        // A customer who asked for a person is answered first, then a
+        // handoff ticket opens for the manager. The ticket does not lock the
+        // dialogue: this reply leaves the building, and so does every answer
+        // that follows until the gaps are closed and the card goes out.
         if needs_expert && self.config.agents.handoff {
             let handoff_ctx = ctx_builder.build_for(AgentKind::Handoff).await?;
             self.phase_handoff(

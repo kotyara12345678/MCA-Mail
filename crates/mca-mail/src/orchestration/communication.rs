@@ -7,8 +7,8 @@ use super::pipeline::call_agent;
 use super::{AgentContextBuilder, Orchestrator};
 use crate::agents::CommunicationAgent;
 use crate::domain::{
-    AgentKind, ConversationDirection, ConversationEntry, DraftStatus, EmailDraft, LeadId,
-    LeadStatus, OutboundState, ProcessingStage, ReplyDisposition, RunId,
+    AgentKind, ConversationDirection, ConversationEntry, DraftStatus, EmailDraft, HandoffReason,
+    LeadId, LeadStatus, OutboundState, ProcessingStage, ReplyDisposition, RunId,
 };
 use crate::error::AppError;
 use crate::observability::Correlation;
@@ -145,14 +145,36 @@ impl Orchestrator {
         }
 
         if plan.handoff_requested && self.config.agents.handoff {
-            self.phase_handoff(
-                corr,
-                &ctx,
-                lead_id,
-                company_name,
-                plan.handoff_reason.as_ref().map(|r| r.as_str()),
-            )
-            .await?;
+            // A ticket in front of the manager is always welcome; silencing
+            // the dialogue is reserved for the reasons that take the
+            // conversation away from the machine — and for the moment the
+            // dialogue is already complete. A mid-dialogue "ready for
+            // manager" or "pricing" flag must not cut off the very customer
+            // it means to serve: the card on completion does that job.
+            let human_takes_over_now = matches!(
+                plan.handoff_reason,
+                Some(
+                    HandoffReason::CallbackRequested
+                        | HandoffReason::ComplianceReview
+                        | HandoffReason::SecurityConcern
+                        | HandoffReason::ManualRequest
+                )
+            );
+            if human_takes_over_now || state.complete {
+                self.phase_handoff(
+                    corr,
+                    &ctx,
+                    lead_id,
+                    company_name,
+                    plan.handoff_reason.as_ref().map(|r| r.as_str()),
+                )
+                .await?;
+            } else {
+                info!(
+                    reason = ?plan.handoff_reason,
+                    "handoff requested mid-dialogue; the dialogue continues until the gaps are closed"
+                );
+            }
         }
         Ok(())
     }

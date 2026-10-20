@@ -27,8 +27,20 @@ crate::domain::wire_enum! {
 }
 
 impl HandoffReason {
+    /// Whether a human taking over means the email agent must stop replying.
+    ///
+    /// Only the reasons that genuinely remove the conversation from the
+    /// machine qualify: regulated goods, a suspected attack, or an operator
+    /// who claimed the lead through the API. Everything else — a callback
+    /// request, commercial readiness, pricing — puts a ticket in front of the
+    /// manager while the dialogue keeps running until its gaps are closed.
     pub const fn blocks_automation(&self) -> bool {
-        true
+        matches!(
+            self,
+            HandoffReason::ComplianceReview
+                | HandoffReason::SecurityConcern
+                | HandoffReason::ManualRequest
+        )
     }
 }
 

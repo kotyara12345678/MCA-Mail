@@ -70,8 +70,16 @@ impl Orchestrator {
         };
 
         handoff_repo::upsert_open(&self.pool, &handoff).await?;
-        lead_repo::lock_automation(&self.pool, lead_id).await?;
-        lead_repo::update_status(&self.pool, lead_id, LeadStatus::HandedOff).await?;
+        if reason.blocks_automation() {
+            lead_repo::lock_automation(&self.pool, lead_id).await?;
+            lead_repo::update_status(&self.pool, lead_id, LeadStatus::HandedOff).await?;
+        } else {
+            info!(
+                lead_id = %lead_id,
+                reason = reason.as_str(),
+                "handoff ticket opened; the dialogue continues until its gaps are closed"
+            );
+        }
         crate::observability::actions::handoff_created(corr, handoff.id, lead_id, reason.as_str());
         Ok(())
     }

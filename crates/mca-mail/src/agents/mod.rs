@@ -33,16 +33,35 @@ pub trait Agent: Send + Sync {
     fn kind(&self) -> AgentKind;
 
     /// Call the LLM and parse a structured response.
+    ///
+    /// A malformed structured answer is a model hiccup, not a verdict: one
+    /// fresh attempt is the difference between a lost email and a lost
+    /// request. Transport errors are not retried here — the provider does
+    /// that — only an answer that arrived but made no sense.
     async fn call_llm_structured<T: serde::de::DeserializeOwned>(
         &self,
         context: &AgentContext,
         system_prompt: &str,
         user_message: &str,
     ) -> Result<T, AgentError> {
-        let response = self
-            .request_llm(context, system_prompt, user_message)
-            .await?;
-        parse_structured(self.kind(), response)
+        let mut parse_failure = None;
+        for _ in 0..2 {
+            let response = self
+                .request_llm(context, system_prompt, user_message)
+                .await?;
+            match parse_structured(self.kind(), response) {
+                Ok(value) => return Ok(value),
+                Err(err) => {
+                    tracing::warn!(
+                        agent = self.kind().as_str(),
+                        error = %err,
+                        "structured response failed to parse; retrying once"
+                    );
+                    parse_failure = Some(err);
+                }
+            }
+        }
+        Err(parse_failure.expect("the loop body always sets the failure"))
     }
 
     /// Single LLM round trip: metrics, token accounting and error mapping in

@@ -518,11 +518,11 @@ async fn one_inbound_email_queues_exactly_one_reply() {
     );
 }
 
-/// A customer who asks for a call is answered in the same turn that hands the
-/// lead over: the lock a handoff applies starts with the next turn, so the
-/// acknowledgement produced here must still reach the outbox.
+/// A customer who asks for a call is answered in the same turn that opens the
+/// manager's handoff ticket — and the ticket leaves the dialogue running: the
+/// lead stays unlocked, so every message that follows still gets an answer.
 #[tokio::test]
-async fn a_callback_request_is_answered_before_the_lead_is_locked() {
+async fn a_callback_request_is_answered_without_locking_the_lead() {
     let _guard = SERIAL.lock().await;
     let pool = setup_db().await;
     let llm = Arc::new(MockLlmProvider::new(&mock_llm_settings()));
@@ -572,7 +572,7 @@ async fn a_callback_request_is_answered_before_the_lead_is_locked() {
             buyer.clone(),
             "queued".to_string()
         )],
-        "the same turn's reply must reach the outbox before any lock"
+        "the same turn's reply must reach the outbox"
     );
 
     let locked: bool = sqlx::query_scalar("SELECT automation_locked FROM leads WHERE id = $1")
@@ -581,8 +581,17 @@ async fn a_callback_request_is_answered_before_the_lead_is_locked() {
         .await
         .expect("lead");
     assert!(
-        locked,
-        "the callback handoff locks the lead from the next turn"
+        !locked,
+        "the callback ticket must not stop the automatic dialogue"
+    );
+    let status: String = sqlx::query_scalar("SELECT status FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(&pool)
+        .await
+        .expect("lead status");
+    assert_ne!(
+        status, "handed_off",
+        "only a blocking reason flips the lead's status"
     );
     let handoffs: i64 =
         sqlx::query_scalar("SELECT count(*) FROM human_handoffs WHERE lead_id = $1")
@@ -591,4 +600,163 @@ async fn a_callback_request_is_answered_before_the_lead_is_locked() {
             .await
             .expect("handoffs");
     assert_eq!(handoffs, 1, "the manager gets exactly one open handoff");
+}
+
+/// A price request may flag a handoff but must never end the conversation:
+/// turn one answers with the gaps still open and opens no ticket, turn two
+/// closes the gaps — only then does the ticket open and the cards go out,
+/// with the lead still unlocked throughout.
+#[tokio::test]
+async fn a_pricing_handoff_keeps_the_dialogue_alive_until_the_card() {
+    let _guard = SERIAL.lock().await;
+    let pool = setup_db().await;
+    let llm = Arc::new(MockLlmProvider::new(&mock_llm_settings()));
+
+    // Turn one: the model — against its instructions — flags a pricing
+    // handoff while the dialogue still has gaps. The server must decline the
+    // ticket and answer anyway.
+    let pricing_reply = serde_json::json!({
+        "subject": "Re: Доставка станков",
+        "body": "Здравствуйте! Уточните, пожалуйста, вес и объём груза — по ним посчитаем стоимость.",
+        "disposition": "send",
+        "questions": ["Уточните, пожалуйста, вес и объём груза?"],
+        "handoff_requested": true,
+        "handoff_reason": "pricing_or_legal",
+        "confidence": 0.9,
+        "rationale": "клиент спрашивает о цене"
+    });
+    stub_pipeline(&llm, &qualification_partial(), &pricing_reply);
+    let orch = build_orchestrator(
+        auto_config(),
+        pool.clone(),
+        llm.clone() as Arc<dyn LlmProvider>,
+    );
+
+    let buyer = format!("pricer-{}@example.com", uuid::Uuid::new_v4());
+    let subject = format!("Стоимость и станки {}", uuid::Uuid::new_v4());
+    let id_one = ingest(
+        &pool,
+        &email(
+            &buyer,
+            &subject,
+            "Сколько стоит перевезти станки из Шэньчжэня в Москву?",
+        ),
+    )
+    .await;
+    orch.process_email(id_one).await.expect("turn one");
+
+    let lead_id = email_repo::get(&pool, id_one)
+        .await
+        .expect("get")
+        .lead_id
+        .expect("a lead must open");
+    assert_eq!(
+        outbox_for_lead(&pool, lead_id).await,
+        vec![(
+            "customer_reply".to_string(),
+            buyer.clone(),
+            "queued".to_string()
+        )],
+        "turn one must answer the price request with the questions it asks"
+    );
+    assert!(
+        !lead_locked(&pool, lead_id).await,
+        "a pricing flag must not lock the lead"
+    );
+    assert_eq!(
+        handoff_count(&pool, lead_id).await,
+        0,
+        "while the dialogue has gaps, a pricing flag opens no ticket"
+    );
+
+    // Turn two: the customer supplies everything, the dialogue completes —
+    // and the model flags the handoff it was never supposed to flag again.
+    let closing_reply = serde_json::json!({
+        "subject": "Re: Доставка станков",
+        "body": "Здравствуйте! Информация полна, менеджер свяжется с вами.",
+        "disposition": "send",
+        "questions": [],
+        "handoff_requested": true,
+        "handoff_reason": "pricing_or_legal",
+        "confidence": 0.9,
+        "rationale": "данные собраны, клиент ждёт расчёт"
+    });
+    llm.stub_json("lead qualification agent", &qualification_complete());
+    llm.stub_json("customer manager at MCA Logistics", &closing_reply);
+    llm.stub_json(
+        "handoff agent for MCA Logistics",
+        &serde_json::json!({
+            "reason": "all details collected",
+            "priority": 50,
+            "cargo_summary": "станки",
+            "route_summary": "Шэньчжэнь — Москва",
+            "requested_service": "transport",
+            "missing_information": [],
+            "open_questions": [],
+            "conversation_digest": "диалог завершён, клиенту нужен расчёт",
+            "checks_performed": [],
+            "unresolved_topics": [],
+            "original_request": "перевезти станки из Шэньчжэня в Москву"
+        }),
+    );
+    let id_two = ingest(
+        &pool,
+        &email(
+            &buyer,
+            &subject,
+            "Вес 12000 кг, объём 30 м3, 2 шт, авто, до конца месяца.",
+        ),
+    )
+    .await;
+    orch.process_email(id_two).await.expect("turn two");
+
+    let mut queued = outbox_for_lead(&pool, lead_id).await;
+    queued.sort();
+    let mut expected = vec![
+        (
+            "customer_reply".to_string(),
+            buyer.clone(),
+            "queued".to_string(),
+        ),
+        (
+            "manager_card".to_string(),
+            MANAGER.to_string(),
+            "queued".to_string(),
+        ),
+        (
+            "manager_card".to_string(),
+            CO_MANAGER.to_string(),
+            "queued".to_string(),
+        ),
+    ];
+    expected.sort();
+    assert_eq!(
+        queued, expected,
+        "the completed dialogue answers, queues a card to every manager, and opens the ticket"
+    );
+    assert_eq!(
+        handoff_count(&pool, lead_id).await,
+        1,
+        "the completed dialogue opens exactly one ticket for the manager"
+    );
+    assert!(
+        !lead_locked(&pool, lead_id).await,
+        "even a completed dialogue leaves the lead unlocked for the next message"
+    );
+}
+
+async fn lead_locked(pool: &sqlx::PgPool, lead_id: LeadId) -> bool {
+    sqlx::query_scalar("SELECT automation_locked FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .expect("lead")
+}
+
+async fn handoff_count(pool: &sqlx::PgPool, lead_id: LeadId) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM human_handoffs WHERE lead_id = $1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .expect("handoffs")
 }
