@@ -63,9 +63,29 @@ pub fn normalize_subject(subject: &str) -> String {
         // `fwd:` and its common localized spellings all reduce to the same
         // prefix, so a forwarded request threads with the original.
         let lower = value.to_ascii_lowercase();
-        let stripped = ["re:", "fw:", "fwd:", "ответ:", "пересылка:"]
-            .iter()
-            .find_map(|prefix| lower.strip_prefix(prefix));
+        let stripped = [
+            "re:",
+            "fw:",
+            "fwd:",
+            "ответ:",
+            "пересылка:",
+            // Localised reply prefixes: a customer answering in Chinese or
+            // German must land in the same thread, not spawn a new lead.
+            "回复:",
+            "回复：",
+            "答复:",
+            "答复：",
+            "转发:",
+            "转发：",
+            "aw:",
+            "wg:",
+            "vs:",
+            "sv:",
+            "tr:",
+            "iv:",
+        ]
+        .iter()
+        .find_map(|prefix| lower.strip_prefix(prefix));
         match stripped {
             Some(rest) => {
                 // Advance by the byte length of the *matched* prefix, not the
@@ -88,6 +108,19 @@ mod tests {
         assert_eq!(normalize_subject("Re: FWD: Re:  Quote "), "Quote");
         assert_eq!(normalize_subject("  Hello   world "), "Hello world");
         assert_eq!(normalize_subject(""), "");
+    }
+
+    /// Localised reply prefixes must reduce to the same thread key, or a
+    /// Chinese or German customer's answer spawns a fresh lead.
+    #[test]
+    fn normalize_subject_strips_localised_reply_prefixes() {
+        assert_eq!(normalize_subject("回复：Re: Тарифы"), "Тарифы");
+        assert_eq!(normalize_subject("回复: Тарифы"), "Тарифы");
+        assert_eq!(normalize_subject("答复： Тарифы"), "Тарифы");
+        assert_eq!(normalize_subject("转发: Тарифы"), "Тарифы");
+        assert_eq!(normalize_subject("AW: Тарифы"), "Тарифы");
+        assert_eq!(normalize_subject("vs: Тарифы"), "Тарифы");
+        assert_eq!(normalize_subject("AW: Re: FW: Тарифы"), "Тарифы");
     }
 
     #[test]

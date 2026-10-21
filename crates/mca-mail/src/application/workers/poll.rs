@@ -103,8 +103,12 @@ async fn resolve_thread(
     _mailbox: &str,
     message: &InboundMessage,
 ) -> Result<crate::domain::ThreadId, AppError> {
-    // Try to chain onto an existing thread by Message-ID references.
-    if let Some(thread) = thread_repo::find_by_reference(pool, &message.references).await? {
+    // Chain onto an existing thread by Message-ID references. `In-Reply-To`
+    // counts too: plenty of clients answer with that header alone, and a
+    // missed chain would spawn a fresh thread — and a fresh lead — for a
+    // reply inside the same conversation.
+    let candidates = reference_candidates(message);
+    if let Some(thread) = thread_repo::find_by_reference(pool, &candidates).await? {
         return Ok(thread);
     }
     // Otherwise use the stable conversation key.
@@ -113,4 +117,63 @@ async fn resolve_thread(
     let key = thread_repo::conversation_key(&participants, &normalized);
     let thread = thread_repo::ensure_thread(pool, &key, &normalized, None).await?;
     Ok(thread)
+}
+
+/// Lookup order: the direct parent first (most precise), then the rest of the
+/// reference chain as sent by the client, without repeating the parent.
+fn reference_candidates(message: &InboundMessage) -> Vec<String> {
+    let mut candidates = Vec::with_capacity(message.references.len() + 1);
+    if let Some(parent) = message.in_reply_to.as_deref() {
+        let parent = parent.trim();
+        if !parent.is_empty() {
+            candidates.push(parent.to_string());
+        }
+    }
+    for reference in &message.references {
+        let reference = reference.trim();
+        if !reference.is_empty() && !candidates.iter().any(|c| c == reference) {
+            candidates.push(reference.to_string());
+        }
+    }
+    candidates
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reference_candidates;
+    use crate::domain::{EmailAddress, InboundMessage};
+
+    fn message(in_reply_to: Option<&str>, references: &[&str]) -> InboundMessage {
+        InboundMessage {
+            provider_message_id: "1".into(),
+            internet_message_id: Some("<one@x>".into()),
+            in_reply_to: in_reply_to.map(str::to_string),
+            references: references.iter().map(|r| r.to_string()).collect(),
+            from: EmailAddress::new("client@example.com"),
+            to: vec![EmailAddress::new("info@mca-log.com")],
+            cc: vec![],
+            subject: "Re: Quote".into(),
+            date: None,
+            text_body: "body".into(),
+            attachments: vec![],
+            total_size: 4,
+        }
+    }
+
+    /// The direct parent wins the lookup, and an `In-Reply-To`-only reply
+    /// still chains instead of falling back to the subject key.
+    #[test]
+    fn in_reply_to_is_a_candidate_before_the_reference_chain() {
+        let both = message(Some("<parent@x>"), &["<root@x>", " <parent@x> "]);
+        let candidates = reference_candidates(&both);
+        assert_eq!(candidates[0], "<parent@x>");
+        assert_eq!(candidates[1], "<root@x>");
+        assert_eq!(candidates.len(), 2, "duplicate parent is not a second key");
+
+        let parent_only = message(Some("<parent@x>"), &[]);
+        assert_eq!(reference_candidates(&parent_only), ["<parent@x>"]);
+
+        let blank = message(Some("  "), &["", "<root@x>"]);
+        assert_eq!(reference_candidates(&blank), ["<root@x>"]);
+    }
 }

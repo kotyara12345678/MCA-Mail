@@ -211,16 +211,24 @@ fn truncate(s: &str, max: usize) -> String {
 /// The one line of the prompt that differs between turns.
 ///
 /// The customer is greeted once, on the first reply we actually send; every
-/// later message is the same conversation continuing.
+/// later message is the same conversation continuing — no greeting, no
+/// self-introduction, straight to the substance.
 fn intro_rule(outbound_count: i64) -> &'static str {
     if outbound_count == 0 {
-        "- This is your first reply to this customer: introduce yourself — you \
-         are Константин from MCA Logistics and you are the person who will look \
-         after this request for them. Sign the reply as Константин."
+        "- This is your first reply to this customer: greet them, introduce \
+         yourself — you are Константин from MCA Logistics and you are the \
+         person who will look after this request for them — and sign the \
+         reply as Константин."
     } else {
-        "- Do not introduce yourself: you have already written to this customer. \
-         Continue the dialogue where it stands, without repeating your name or \
-         saying again who you are."
+        "- This message continues a conversation you have already opened. Do \
+         NOT open the reply with a greeting: no \"Здравствуйте\", no \"Добрый \
+         день\", no \"Hello\" or \"Dear ...\" at the start. Do not introduce \
+         yourself, do not say your name, and do not say again who you work \
+         for — the customer already knows. Start directly with the substance: \
+         the answer, the question or the confirmation. The only exception is \
+         a greeting inside THIS customer's email: return it in a few words, \
+         then move on. Write like a person continuing a dialogue: just the \
+         content."
     }
 }
 
@@ -228,22 +236,31 @@ fn intro_rule(outbound_count: i64) -> &'static str {
 mod tests {
     use super::{intro_rule, SYSTEM};
 
-    /// Only the first reply introduces him; a dialogue already under way must
-    /// not open with the same greeting every time.
+    /// Only the first reply greets and introduces him; a dialogue already
+    /// under way must not open with the same greeting every time.
     #[test]
     fn only_the_first_reply_introduces_konstantin() {
         let first = intro_rule(0);
         assert!(first.contains("Константин"), "first: {first}");
         assert!(first.contains("first reply"), "first: {first}");
+        assert!(first.contains("greet them"), "first: {first}");
 
         for outbound in [1, 2, 7] {
             let later = intro_rule(outbound);
             assert!(
-                later.contains("Do not introduce"),
+                later.contains("Do NOT open the reply with a greeting"),
+                "outbound {outbound}: {later}"
+            );
+            assert!(
+                later.contains("Do not introduce yourself"),
                 "outbound {outbound}: {later}"
             );
             assert!(
                 !later.contains("first reply"),
+                "outbound {outbound}: {later}"
+            );
+            assert!(
+                !later.contains("greet them"),
                 "outbound {outbound}: {later}"
             );
         }
