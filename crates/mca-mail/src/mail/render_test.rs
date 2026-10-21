@@ -29,6 +29,20 @@ fn threading_headers_survive_rendering() {
 }
 
 #[test]
+fn plain_text_output_declares_mime_so_clients_decode_it() {
+    let raw = String::from_utf8(rfc5322(&message(), "agent@mca.example", "MCA").unwrap()).unwrap();
+    assert!(raw.contains("MIME-Version: 1.0"), "{raw}");
+    assert!(
+        raw.contains("Content-Type: text/plain; charset=utf-8"),
+        "{raw}"
+    );
+    assert!(
+        raw.contains("Content-Transfer-Encoding:"),
+        "a transfer encoding without a content type shows up as raw base64: {raw}"
+    );
+}
+
+#[test]
 fn invalid_recipient_is_refused_before_sending() {
     let mut msg = message();
     msg.to = vec![EmailAddress::new("not-an-address")];

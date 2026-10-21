@@ -68,6 +68,8 @@ pub struct MailboxMutationLog {
     pub applied: AtomicUsize,
     /// Attempts refused by the read-only guard.
     pub refused: AtomicUsize,
+    /// The last flag a test asked for, so a suite can pin the exact keyword.
+    pub last_flag: std::sync::Mutex<Option<(u32, String)>>,
 }
 
 impl MailboxMutationLog {
@@ -101,6 +103,7 @@ impl MailboxMutationLog {
         ] {
             counter.store(0, Ordering::SeqCst);
         }
+        *self.last_flag.lock().expect("last_flag lock") = None;
     }
 }
 
@@ -381,6 +384,7 @@ impl MailboxWriter for MockMailProvider {
         self.guard
             .check_flag(super::ops::MailboxOp::SetFlag, Some(&uid.to_string()), flag)?;
         self.mutations.applied.fetch_add(1, Ordering::SeqCst);
+        *self.mutations.last_flag.lock().expect("last_flag lock") = Some((uid, flag.to_string()));
         tracing::debug!(uid, flag, "mock set flag");
         Ok(())
     }

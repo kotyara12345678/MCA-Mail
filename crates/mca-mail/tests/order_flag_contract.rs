@@ -18,10 +18,11 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
 use mca_mail::api::{self, ApiState};
-use mca_mail::config::{ApiSettings, AppConfig, EmailMode};
+use mca_mail::config::{ApiSettings, AppConfig, EmailMode, MailMode};
 use mca_mail::domain::{EmailAddress, EmailStatus, InboundMessage};
 use mca_mail::llm::mock::MockLlmProvider;
 use mca_mail::llm::LlmProvider;
+use mca_mail::mail::MockMailProvider;
 use mca_mail::orchestration::{Orchestrator, OrchestratorBuilder};
 use mca_mail::persistence::{api_key_repo, email_repo, thread_repo};
 use mca_mail::tools::ToolRegistry;
@@ -587,6 +588,65 @@ async fn reprocessing_keeps_one_stable_flag() {
         lead_rows(&pg, id).await,
         1,
         "a reprocess must not open a second lead"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 5. the flag reaches the manager's webmail
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn flagged_order_is_starred_in_the_mailbox() {
+    let _guard = SERIAL.lock().await;
+    let Some(pg) = test_pool().await else { return };
+
+    let llm = Arc::new(MockLlmProvider::new(&mock_llm_settings()));
+    stub_turn(
+        &llm,
+        &replies::not_spam(),
+        &classification("transport_request", 0.9),
+    );
+
+    let mut cfg = review_config();
+    cfg.security.email_mode = EmailMode::Auto;
+    let mailbox = Arc::new(MockMailProvider::with_mode(MailMode::ReadWrite));
+    let log = mailbox.mutation_log();
+    let orch = Arc::new(
+        OrchestratorBuilder::new()
+            .config(cfg)
+            .pool(pg.clone())
+            .tools(ToolRegistry::new())
+            .llm(llm)
+            .mailbox(Some(mailbox))
+            .build()
+            .expect("build orchestrator"),
+    );
+
+    let id = ingest(
+        &pg,
+        &email(
+            &fresh_address(),
+            "Запрос на перевозку станков",
+            "Нужна перевозка двух станков ЧПУ из Шэньчжэня в Москву, 1800 кг каждый.",
+        ),
+    )
+    .await;
+    sqlx::query("UPDATE emails SET provider_uid = '91' WHERE id = $1")
+        .bind(id)
+        .execute(&pg)
+        .await
+        .expect("stamp uid");
+    orch.process_email(id).await.expect("process");
+
+    assert!(
+        order_flag(&pg, id).await,
+        "the database flag is the source of truth"
+    );
+    let last = log.last_flag.lock().expect("last_flag lock").clone();
+    assert_eq!(
+        last,
+        Some((91u32, "\\Flagged".to_string())),
+        "the order must carry the webmail star"
     );
 }
 

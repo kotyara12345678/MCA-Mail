@@ -1,15 +1,16 @@
 //! Phases 1-2: spam detection and classification.
 
-use tracing::info;
+use tracing::{info, warn};
 
 use super::pipeline::call_agent;
 use super::{AgentContextBuilder, Orchestrator};
 use crate::agents::{ClassificationAgent, SpamAgent};
 use crate::domain::{
     confident_spam, is_order_related, AgentKind, EmailCategory, EmailStatus, EmailThread,
-    ProcessingStage, RunId, SpamVerdict,
+    ProcessingStage, RunId, SpamVerdict, StoredEmail,
 };
 use crate::error::AppError;
+use crate::mail::MailboxWriter;
 use crate::observability::Correlation;
 use crate::persistence::{email_repo, run_repo};
 
@@ -84,7 +85,7 @@ impl Orchestrator {
 
         run_repo::record_stage(&self.pool, *run_id, ProcessingStage::Classification, true).await?;
         email_repo::set_category(&self.pool, *email_id, category).await?;
-        self.raise_order_flag(*email_id, thread, category, outcome.confidence)
+        self.raise_order_flag(corr, &ctx.email, thread, category, outcome.confidence)
             .await?;
 
         let early = match category {
@@ -111,11 +112,13 @@ impl Orchestrator {
     /// call, no second opinion.
     async fn raise_order_flag(
         &self,
-        email_id: uuid::Uuid,
+        corr: &Correlation,
+        email: &StoredEmail,
         thread: &EmailThread,
         category: EmailCategory,
         confidence: f32,
     ) -> Result<(), AppError> {
+        let email_id = email.id;
         let spam = email_repo::spam_verdict(&self.pool, email_id).await?;
         let thread_context = email_repo::thread_has_order(&self.pool, thread.id, email_id).await?;
         if !is_order_related(category, spam, confidence, thread_context) {
@@ -123,6 +126,57 @@ impl Orchestrator {
         }
         email_repo::raise_order_flag(&self.pool, email_id).await?;
         info!(email_id = %email_id, category = category.as_str(), "order flag raised");
+        self.flag_in_mailbox(corr, email).await;
         Ok(())
+    }
+
+    /// Mirror of the database flag onto the server-side `\Flagged` star, so a
+    /// manager scanning the webmail sees the same orders the API reports.
+    ///
+    /// Best effort like the quarantine move: the row is the source of truth,
+    /// a refused STORE is logged and nothing retries.
+    async fn flag_in_mailbox(&self, corr: &Correlation, email: &StoredEmail) {
+        if !self.config.security.email_mode.allows_mailbox_mutation() {
+            warn!(
+                email_id = %email.id,
+                processing_id = %corr.processing_id,
+                "mailbox mutation disabled; order flag stays in the database"
+            );
+            return;
+        }
+        let Some(mailbox) = self.mailbox.as_ref() else {
+            warn!(
+                email_id = %email.id,
+                processing_id = %corr.processing_id,
+                "no mailbox handle; order flag stays in the database"
+            );
+            return;
+        };
+        let uid = match email.provider_uid.as_deref().map(str::parse::<u32>) {
+            Some(Ok(uid)) => uid,
+            _ => {
+                warn!(
+                    email_id = %email.id,
+                    processing_id = %corr.processing_id,
+                    "message carries no server UID; cannot set the order flag"
+                );
+                return;
+            }
+        };
+        match MailboxWriter::set_flag(&**mailbox, uid, "\\Flagged").await {
+            Ok(()) => info!(
+                email_id = %email.id,
+                processing_id = %corr.processing_id,
+                uid,
+                "order flag set in the mailbox"
+            ),
+            Err(error) => warn!(
+                email_id = %email.id,
+                processing_id = %corr.processing_id,
+                uid,
+                %error,
+                "order flag could not be set in the mailbox"
+            ),
+        }
     }
 }

@@ -52,7 +52,7 @@ pub fn build(
                 .singlepart(SinglePart::plain(message.text_body.clone()))
                 .singlepart(SinglePart::html(html.to_string())),
         ),
-        None => builder.body(message.text_body.clone()),
+        None => builder.singlepart(SinglePart::plain(message.text_body.clone())),
     };
     built.map_err(|e| MailError::Rejected(e.to_string()))
 }

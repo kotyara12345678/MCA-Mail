@@ -76,7 +76,10 @@ impl MailGuard {
         flag: &str,
     ) -> Result<(), MailError> {
         self.check(op, subject)?;
-        if matches!(flag.to_ascii_uppercase().as_str(), "\\SEEN" | "$JUNK") {
+        if matches!(
+            flag.to_ascii_uppercase().as_str(),
+            "\\SEEN" | "\\FLAGGED" | "$JUNK"
+        ) {
             return Ok(());
         }
         Err(MailError::OperationNotAllowed {
@@ -162,6 +165,9 @@ mod tests {
         let guard = MailGuard::new(MailMode::ReadWrite);
         assert!(guard.check_flag(MailboxOp::SetFlag, None, "\\Seen").is_ok());
         assert!(guard.check_flag(MailboxOp::SetFlag, None, "$Junk").is_ok());
+        assert!(guard
+            .check_flag(MailboxOp::SetFlag, None, "\\Flagged")
+            .is_ok());
         assert!(guard
             .check_flag(MailboxOp::SetFlag, None, "\\Deleted")
             .is_err());
