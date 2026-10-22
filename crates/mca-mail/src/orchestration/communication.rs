@@ -76,7 +76,7 @@ impl Orchestrator {
         // Handoff and suppression keep their meaning either way.
         let disposition = match plan.disposition {
             ReplyDisposition::Suppress => ReplyDisposition::Suppress,
-            _ if self.may_autosend() => ReplyDisposition::Send,
+            _ if self.may_autosend().await => ReplyDisposition::Send,
             ReplyDisposition::Send => ReplyDisposition::Draft,
             other => other,
         };
@@ -241,8 +241,18 @@ impl Orchestrator {
         None
     }
 
-    fn may_autosend(&self) -> bool {
-        self.config.security.email_mode.allows_sending() && self.config.security.outbound.auto_send
+    /// Whether this reply may bypass the reviewer.
+    ///
+    /// The mode is read fresh from the settings table (falling back to the
+    /// configured `EMAIL_MODE`), so flipping the panel switch to `review`
+    /// demotes the very next auto-send to a draft without a restart.
+    async fn may_autosend(&self) -> bool {
+        let mode = crate::persistence::settings_repo::effective_email_mode(
+            &self.pool,
+            self.config.security.email_mode,
+        )
+        .await;
+        mode.allows_sending() && self.config.security.outbound.auto_send
     }
 
     /// The dialogue is over: either the data is complete, or nothing more is

@@ -29,6 +29,18 @@ impl EmailMode {
         }
     }
 
+    /// Parse the wire form (`dry_run` / `review` / `auto`). Returns `None` for
+    /// anything else so callers can reject an API input with a 400 instead of
+    /// silently falling back to some default.
+    pub fn parse(raw: &str) -> Option<EmailMode> {
+        match raw.trim() {
+            "dry_run" => Some(EmailMode::DryRun),
+            "review" => Some(EmailMode::Review),
+            "auto" => Some(EmailMode::Auto),
+            _ => None,
+        }
+    }
+
     /// May the system send mail to an external party?
     pub const fn allows_sending(&self) -> bool {
         matches!(self, EmailMode::Auto)

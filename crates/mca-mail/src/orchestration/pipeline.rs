@@ -54,6 +54,11 @@ impl Orchestrator {
         email_id: &uuid::Uuid,
         thread: &EmailThread,
     ) -> Result<EmailStatus, AppError> {
+        let email_mode = crate::persistence::settings_repo::effective_email_mode(
+            &self.pool,
+            self.config.security.email_mode,
+        )
+        .await;
         let ctx_builder = AgentContextBuilder::new(
             self.pool.clone(),
             *run_id,
@@ -61,7 +66,7 @@ impl Orchestrator {
             self.llm.clone(),
             self.tools.clone(),
             self.config.agents.clone(),
-            self.config.security.email_mode,
+            email_mode,
         );
 
         if let Some(status) = self

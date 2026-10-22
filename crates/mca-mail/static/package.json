@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "Marks the panel assets as ES modules for the browser and for `node --test`. Nothing here is bundled or published."
+}

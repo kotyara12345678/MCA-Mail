@@ -15,7 +15,12 @@ impl Orchestrator {
     /// operator can still find it. Failing the run instead would throw the
     /// verdict away along with the transport.
     pub(super) async fn quarantine_spam(&self, corr: &Correlation, email: &StoredEmail) {
-        if !self.config.security.email_mode.allows_mailbox_mutation() {
+        let mode = crate::persistence::settings_repo::effective_email_mode(
+            &self.pool,
+            self.config.security.email_mode,
+        )
+        .await;
+        if !mode.allows_mailbox_mutation() {
             warn!(
                 email_id = %email.id,
                 processing_id = %corr.processing_id,

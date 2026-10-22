@@ -11,6 +11,7 @@ mod ops;
 mod profiles;
 mod settings;
 mod summary;
+mod threads;
 mod usage;
 
 use axum::Router;
@@ -26,4 +27,5 @@ pub fn routes() -> Router<SharedState> {
         .merge(ops::routes())
         .merge(drafts::routes())
         .merge(maintenance::routes())
+        .merge(threads::routes())
 }

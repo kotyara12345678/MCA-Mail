@@ -25,6 +25,11 @@ pub const POLL_PAUSED: &str = "pipeline.poll_paused";
 pub const QUEUE_PAUSED: &str = "pipeline.queue_paused";
 pub const OUTBOX_PAUSED: &str = "pipeline.outbox_paused";
 
+/// Agent autonomy mode (`dry_run` / `review` / `auto`). Absent means "use the
+/// configured `EMAIL_MODE`"; present, it overrides the boot configuration, so
+/// the panel can change how much the agent may do without a restart.
+pub const AGENT_MODE: &str = "agent.mode";
+
 /// Read a pause switch; any error (or an unset key) means "running", because
 /// a broken settings table must not silently stop the mail flow.
 pub async fn is_paused(pool: &PgPool, key: &str) -> bool {
@@ -104,4 +109,59 @@ pub async fn set_automation_enabled(
         updated_by,
     )
     .await
+}
+
+/// Read the runtime agent-mode override. `Ok(None)` means "not set, fall back
+/// to the configured `EMAIL_MODE`". A stored value that no longer parses logs
+/// a warning and also falls back, so a hand-edited row cannot brick the
+/// pipeline.
+pub async fn get_agent_mode(pool: &PgPool) -> Result<Option<crate::config::EmailMode>, AppError> {
+    let value = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT value FROM system_settings WHERE key = $1",
+    )
+    .bind(AGENT_MODE)
+    .fetch_optional(pool)
+    .await?;
+    match value {
+        None => Ok(None),
+        Some(v) => match v.as_str().and_then(crate::config::EmailMode::parse) {
+            Some(mode) => Ok(Some(mode)),
+            None => {
+                tracing::warn!(value = %v, "invalid stored agent.mode; falling back to config");
+                Ok(None)
+            }
+        },
+    }
+}
+
+pub async fn set_agent_mode(
+    pool: &PgPool,
+    mode: crate::config::EmailMode,
+    updated_by: &str,
+) -> Result<(), AppError> {
+    set(
+        pool,
+        AGENT_MODE,
+        serde_json::Value::String(mode.as_str().to_string()),
+        updated_by,
+    )
+    .await
+}
+
+/// The mode the system is actually running under right now: the stored
+/// override if present, otherwise the boot configuration. Every send-side
+/// decision reads through here so the panel's switch takes effect on the next
+/// tick rather than after a restart.
+pub async fn effective_email_mode(
+    pool: &PgPool,
+    default: crate::config::EmailMode,
+) -> crate::config::EmailMode {
+    match get_agent_mode(pool).await {
+        Ok(Some(mode)) => mode,
+        Ok(None) => default,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to read agent.mode; using configured mode");
+            default
+        }
+    }
 }

@@ -987,6 +987,20 @@ async fn spa_shell_answers_pages_and_404s_json_for_api_typos() {
     let css = send(app.clone(), "GET", "/static/style.css", None, None, None).await;
     assert_eq!(css.status(), StatusCode::OK);
 
+    // Every ES module the shell imports must be served by the binary too —
+    // a missing one is a blank panel in production and nowhere else.
+    for module in [
+        "/static/js/api.js",
+        "/static/js/ui.js",
+        "/static/js/views/dialogs.js",
+        "/static/js/views/settings.js",
+        "/static/js/views/models.js",
+        "/static/js/views/costs.js",
+    ] {
+        let response = send(app.clone(), "GET", module, None, None, None).await;
+        assert_eq!(response.status(), StatusCode::OK, "module {module}");
+    }
+
     // A deep link refresh falls back to the shell (GET, non-API path).
     let deep = send(app.clone(), "GET", "/any/spa/route", None, None, None).await;
     assert_eq!(deep.status(), StatusCode::OK, "SPA fallback serves pages");

@@ -110,8 +110,16 @@ async fn deliver(
         }
     }
 
-    let context = policy_context(pool, config, &row).await?;
-    let guard = OutboundPolicyGuard::from_config(config);
+    // The panel can flip the agent's mode at any moment; read it fresh for
+    // every message so a switch to `dry_run` stops delivery on the very next
+    // row instead of after a restart.
+    let mode = settings_repo::effective_email_mode(pool, config.security.email_mode).await;
+    let context = policy_context(pool, mode, &row).await?;
+    let guard = OutboundPolicyGuard::new(
+        mode,
+        config.security.outbound.clone(),
+        config.security.attachments.allow_outbound_attachments,
+    );
 
     match guard.evaluate(&context) {
         OutboundDecision::Send => {}
@@ -197,17 +205,13 @@ async fn deliver(
 /// a queued message may have been waiting while the answer changed.
 async fn policy_context(
     pool: &PgPool,
-    config: &AppConfig,
+    mode: crate::config::EmailMode,
     row: &outbox_repo::OutboundRow,
 ) -> Result<PolicyContext, crate::error::AppError> {
     let stats = outbox_repo::send_stats(pool, &row.recipient).await?;
-    let mut context = PolicyContext::denied_by_default(
-        config.security.email_mode,
-        &row.recipient,
-        chrono::Utc::now(),
-    )
-    .with_sends(stats.recipient_last_hour, stats.total_last_hour)
-    .with_body(row.body_text.chars().count());
+    let mut context = PolicyContext::denied_by_default(mode, &row.recipient, chrono::Utc::now())
+        .with_sends(stats.recipient_last_hour, stats.total_last_hour)
+        .with_body(row.body_text.chars().count());
     context.lead_id = row.lead_id;
     context.last_sent_at = stats.last_sent_at;
 
