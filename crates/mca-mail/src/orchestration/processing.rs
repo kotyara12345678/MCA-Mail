@@ -56,6 +56,14 @@ impl Orchestrator {
                 );
                 run_repo::finish(&self.pool, run.id, RunState::Failed, Some(&e.to_string()))
                     .await?;
+                // Back to the queue for another try after the claim backoff;
+                // once the attempts are spent it becomes visible to a human.
+                if attempts >= email_repo::MAX_ATTEMPTS {
+                    email_repo::set_status(&self.pool, email_id, EmailStatus::NeedsReview, None)
+                        .await?;
+                } else {
+                    email_repo::release(&self.pool, email_id, &e.to_string()).await?;
+                }
             }
             Err(e) => {
                 // A malformed agent output is a model glitch, not a broken

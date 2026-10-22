@@ -112,9 +112,19 @@ pub trait Agent: Send + Sync {
                     0,
                     0,
                 );
-                return Err(AgentError::InvalidOutput {
-                    agent: self.kind(),
-                    reason: e.to_string(),
+                // A transient provider failure (429, 5xx, timeout) keeps its
+                // retryable identity so the queue can try again; everything
+                // else is a verdict on this response and stays terminal.
+                return Err(if e.is_retryable() {
+                    AgentError::Provider {
+                        agent: self.kind(),
+                        source: e,
+                    }
+                } else {
+                    AgentError::InvalidOutput {
+                        agent: self.kind(),
+                        reason: e.to_string(),
+                    }
                 });
             }
         };

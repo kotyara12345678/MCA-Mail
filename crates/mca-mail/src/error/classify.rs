@@ -41,6 +41,7 @@ impl AppError {
     pub fn is_retryable(&self) -> bool {
         match self {
             AppError::Llm(e) => e.is_retryable(),
+            AppError::Agent(e) => e.is_retryable(),
             AppError::Mail(m) => matches!(m, MailError::Connect(_) | MailError::Unavailable(_)),
             AppError::Unavailable(_) | AppError::Database(_) => true,
             _ => false,

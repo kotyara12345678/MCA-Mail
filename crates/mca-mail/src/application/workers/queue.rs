@@ -19,7 +19,7 @@ use crate::shutdown::{stopping, Rx};
 /// accepts the already-claimed `processing` state.
 pub async fn queue_loop(pool: PgPool, orchestrator: Arc<Orchestrator>, mut shutdown: Rx) {
     let concurrency: i64 = 4;
-    let max_attempts: i32 = 3;
+    let max_attempts: i32 = email_repo::MAX_ATTEMPTS;
     let mut ticker = interval(Duration::from_secs(2));
     info!(concurrency, "queue loop started");
 

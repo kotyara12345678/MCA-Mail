@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{Agent, AgentIdentity};
 use crate::domain::{
-    AgentKind, CommunicationPlan, Confidence, HandoffReason, LeadId, ReplyDisposition,
+    AgentKind, CommunicationPlan, Confidence, ConversationDirection, ConversationEntry,
+    HandoffReason, LeadId, ReplyDisposition,
 };
 use crate::error::AgentError;
 use crate::orchestration::{AgentContext, Dialogue};
@@ -94,6 +95,11 @@ Guidelines:
   An item from "Missing information" that was already asked and is still
   unanswered may be mentioned once as a reminder inside the same list, but it
   must not be phrased as a new question and must not be listed in "questions".
+- "Earlier messages in this conversation" is what the customer and MCA have
+  already written to each other in this thread. Never ask it a question it
+  already answers — a route, a city, a weight, a name or a company detail
+  stated there is known, not missing — and never restate what it already
+  said. Continue the dialogue where it stands.
 - Flag a handoff only when the client asks for a phone call or requests to
   speak with a person: set "handoff_requested": true and "handoff_reason":
   "callback_requested".
@@ -163,10 +169,13 @@ impl CommunicationAgent {
                 .join(", ")
         };
 
+        let history = format_history(&state.history, Some(context.email_id));
+
         let user = format!(
             "Reply to this email.\n\nFrom: {}\nSubject: {}\nDate: {}\n\n\
              Already known about this order:\n{}\n\nMissing information:\n{}\n\n\
-             Already asked this customer:\n{}\n\nOriginal message:\n{}",
+             Already asked this customer:\n{}\n\nEarlier messages in this \
+             conversation:\n{}\n\nOriginal message:\n{}",
             context.email.from_address,
             context.email.subject,
             context
@@ -189,6 +198,7 @@ impl CommunicationAgent {
             } else {
                 asked
             },
+            history,
             truncate(&context.email.text_body, 4000)
         );
 
@@ -206,6 +216,38 @@ impl Agent for CommunicationAgent {
 
 fn truncate(s: &str, max: usize) -> String {
     super::prompt::truncate_for_prompt(s, max)
+}
+
+/// The thread so far for the prompt: newest few entries, oldest first.
+///
+/// The current inbound message is excluded — it arrives separately as
+/// "Original message" — and every entry is capped, so a long history can
+/// never crowd out the message being answered.
+fn format_history(history: &[ConversationEntry], current: Option<uuid::Uuid>) -> String {
+    let mut earlier: Vec<&ConversationEntry> = history
+        .iter()
+        .filter(|e| match (e.email_id, current) {
+            (Some(seen), Some(now)) => seen != now,
+            _ => true,
+        })
+        .filter(|e| !e.body.trim().is_empty())
+        .take(6)
+        .collect();
+    earlier.reverse();
+    if earlier.is_empty() {
+        return "(no earlier messages)".to_string();
+    }
+    earlier
+        .iter()
+        .map(|entry| {
+            let who = match entry.direction {
+                ConversationDirection::Inbound => "customer",
+                ConversationDirection::Outbound => "MCA",
+            };
+            format!("[{}]: {}", who, truncate(&entry.body, 400))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The one line of the prompt that differs between turns.
@@ -234,7 +276,98 @@ fn intro_rule(outbound_count: i64) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{intro_rule, SYSTEM};
+    use super::{format_history, intro_rule, SYSTEM};
+    use crate::domain::{ConversationDirection, ConversationEntry, LeadId, OutboundState};
+
+    fn entry(
+        direction: ConversationDirection,
+        email_id: Option<uuid::Uuid>,
+        body: &str,
+    ) -> ConversationEntry {
+        ConversationEntry {
+            id: uuid::Uuid::new_v4(),
+            lead_id: LeadId::new_v4(),
+            email_id,
+            direction,
+            state: OutboundState::Approved,
+            subject: "Тема".into(),
+            body: body.into(),
+            sent_at: None,
+            created_at: chrono::Utc::now(),
+            idempotency_key: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+
+    /// History arrives newest-first; the prompt reads oldest-first, skips the
+    /// message being answered, keeps only the recent tail and labels sides.
+    #[test]
+    fn history_is_chronological_recent_and_skips_the_current_message() {
+        let current = uuid::Uuid::new_v4();
+        let oldest = entry(
+            ConversationDirection::Inbound,
+            None,
+            "первое письмо клиента",
+        );
+        let outbound = entry(ConversationDirection::Outbound, None, "наш ответ");
+        let newest_old = entry(
+            ConversationDirection::Inbound,
+            None,
+            "второе письмо клиента",
+        );
+        let current_msg = entry(
+            ConversationDirection::Inbound,
+            Some(current),
+            "то, что отвечаем",
+        );
+        // Newest first, as `conversation_repo::history` returns it.
+        let history = vec![current_msg, newest_old, outbound, oldest];
+
+        let text = format_history(&history, Some(current));
+        assert!(
+            !text.contains("то, что отвечаем"),
+            "current repeated: {text}"
+        );
+        let customer = text.find("[customer]").expect("customer line");
+        let mca = text.find("[MCA]").expect("mca line");
+        let second = text.rfind("[customer]").expect("second customer line");
+        assert!(customer < mca && mca < second, "not chronological: {text}");
+        assert!(text.contains("первое письмо клиента"), "{text}");
+        assert!(text.contains("наш ответ"), "{text}");
+    }
+
+    /// Six entries at most, the most recent six — a long thread must not
+    /// crowd out the message itself. The slice is newest-first, so `turn 0`
+    /// is the latest and `turn 8` the oldest.
+    #[test]
+    fn history_keeps_only_the_recent_tail() {
+        let history: Vec<_> = (0..9)
+            .map(|i| entry(ConversationDirection::Inbound, None, &format!("turn {i}")))
+            .collect();
+        let text = format_history(&history, None);
+        assert!(!text.contains("turn 6"), "tail wrong: {text}");
+        assert!(text.contains("turn 5"), "tail lost: {text}");
+        assert!(text.contains("turn 0"), "tail lost: {text}");
+        assert_eq!(text.matches("[customer]").count(), 6, "{text}");
+    }
+
+    /// Nothing in the thread yet: the section still renders, without
+    /// pretending there was a conversation.
+    #[test]
+    fn empty_history_says_so() {
+        assert_eq!(format_history(&[], None), "(no earlier messages)");
+        let blanks = vec![entry(ConversationDirection::Inbound, None, "   ")];
+        assert_eq!(format_history(&blanks, None), "(no earlier messages)");
+    }
+
+    /// A pasted contract or a long letter is cut down so history never
+    /// crowds out the message being answered.
+    #[test]
+    fn history_entries_are_capped() {
+        let long = "x".repeat(10_000);
+        let history = vec![entry(ConversationDirection::Inbound, None, &long)];
+        let text = format_history(&history, None);
+        assert!(text.len() < 600, "capped history is {} chars", text.len());
+    }
 
     /// Only the first reply greets and introduces him; a dialogue already
     /// under way must not open with the same greeting every time.

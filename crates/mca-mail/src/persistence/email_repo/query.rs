@@ -117,7 +117,9 @@ pub async fn get(pool: &PgPool, id: EmailId) -> Result<StoredEmail, AppError> {
 /// Claim up to `limit` unprocessed messages.
 ///
 /// `FOR UPDATE SKIP LOCKED` lets several workers share the queue without ever
-/// handing the same message to two of them.
+/// handing the same message to two of them. A message released after a
+/// transient failure waits out an exponential backoff before it is eligible
+/// again, so a rate-limited provider gets breathing room instead of a hot loop.
 pub async fn claim_batch(
     pool: &PgPool,
     limit: i64,
@@ -125,7 +127,11 @@ pub async fn claim_batch(
 ) -> Result<Vec<EmailRow>, AppError> {
     let sql = format!(
         "UPDATE emails SET status = 'processing' WHERE id IN ( \
-           SELECT id FROM emails WHERE status IN ('pending','failed') AND attempts < $2 \
+           SELECT id FROM emails WHERE attempts < $2 \
+             AND (status = 'pending' \
+                  OR (status = 'failed' \
+                      AND updated_at < now() - make_interval( \
+                          secs => LEAST(300, 30 * power(2, attempts))))) \
            ORDER BY received_at FOR UPDATE SKIP LOCKED LIMIT $1) \
          RETURNING {EMAIL_COLUMNS}"
     );
