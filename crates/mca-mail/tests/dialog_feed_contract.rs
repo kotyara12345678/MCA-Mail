@@ -422,6 +422,77 @@ async fn thread_list_and_feed_serve_one_chronological_conversation() {
 }
 
 // ---------------------------------------------------------------------------
+// 1b. the orders filter — the panel's default view
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn orders_filter_shows_only_red_flagged_threads() {
+    let Some(pg) = test_pool().await else { return };
+    let app = app(pg.clone());
+    let viewer = mint(&pg, "orders-filter-viewer", api_key_repo::Role::Viewer).await;
+
+    // One thread with the red flag (the panel's "Заказы" view), one without.
+    let marked = ingest(
+        &pg,
+        &email(
+            &format!("orders-{}@client.ru", uuid::Uuid::new_v4()),
+            "Заказ на перевозку",
+            "Нужны три фуры до Казани.",
+        ),
+    )
+    .await;
+    email_repo::raise_order_flag(&pg, marked)
+        .await
+        .expect("raise flag");
+    let plain = ingest(
+        &pg,
+        &email(
+            &format!("noise-{}@client.ru", uuid::Uuid::new_v4()),
+            "Подписка на рассылку",
+            "Предлагаем услуги грузоперевозок по всей России.",
+        ),
+    )
+    .await;
+
+    let flagged_thread: uuid::Uuid =
+        sqlx::query_scalar("SELECT thread_id FROM emails WHERE id = $1")
+            .bind(marked)
+            .fetch_one(&pg)
+            .await
+            .expect("thread of flagged");
+    let plain_thread: uuid::Uuid = sqlx::query_scalar("SELECT thread_id FROM emails WHERE id = $1")
+        .bind(plain)
+        .fetch_one(&pg)
+        .await
+        .expect("thread of plain");
+
+    let response = send(
+        app,
+        "GET",
+        "/api/admin/threads?flagged=true&limit=200",
+        Some(&viewer),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let ids: Vec<String> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter_map(|row| row["id"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        ids.contains(&flagged_thread.to_string()),
+        "flagged thread visible under flagged=true: {ids:?}",
+    );
+    assert!(
+        !ids.contains(&plain_thread.to_string()),
+        "unflagged thread hidden under flagged=true: {ids:?}",
+    );
+}
+
+// ---------------------------------------------------------------------------
 // 2. attention lifecycle
 // ---------------------------------------------------------------------------
 

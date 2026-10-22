@@ -25,7 +25,7 @@ import {
 
 const state = {
   search: '',
-  filter: 'all', // all | attention
+  filter: 'orders', // orders | attention | all — orders first: the panel exists to process them
   threads: [],
   total: 0,
   activeId: null,
@@ -117,8 +117,9 @@ function renderListPane() {
         { class: 'row' },
         segmented(
           [
-            ['all', 'Все'],
+            ['orders', 'Заказы'],
             ['attention', 'Требуют внимания'],
+            ['all', 'Все'],
           ],
           state.filter,
           (value) => {
@@ -164,6 +165,7 @@ async function loadList({ silent = false } = {}) {
     const data = await api.threads({
       search: state.search.trim() || undefined,
       status: state.filter === 'attention' ? 'attention' : undefined,
+      flagged: state.filter === 'orders' ? true : undefined,
       limit: 100,
     });
     state.threads = data.items || [];
