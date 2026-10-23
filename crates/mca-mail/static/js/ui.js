@@ -225,7 +225,20 @@ export function modal({ title, body, actions }) {
     el('div', { class: 'modal-body' }, body),
     actions ? el('div', { class: 'modal-actions' }, actions) : null,
   );
-  root.replaceChildren(el('div', { class: 'modal-backdrop', onClick: close }, dialog));
+  root.replaceChildren(
+    el(
+      'div',
+      {
+        class: 'modal-backdrop',
+        // Close on the backdrop itself only: a click on a field or select
+        // inside the dialog bubbles here and must not dismiss the window.
+        onClick: (event) => {
+          if (!dialog.contains(event.target)) close();
+        },
+      },
+      dialog,
+    ),
+  );
   return close;
 }
 
