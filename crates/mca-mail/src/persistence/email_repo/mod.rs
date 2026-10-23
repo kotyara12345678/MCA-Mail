@@ -17,7 +17,7 @@ pub const MAX_ATTEMPTS: i32 = 3;
 pub use attachments::{attachments, insert_attachments, purge_attachment_text};
 pub use dedup::{dedup_key_for, scoped_dedup_key_for};
 pub use query::{
-    claim_batch, count, find, get, list, spam_verdict, status_counts, thread_has_order,
+    claim_batch, count, find, get, list, order_flag, spam_verdict, status_counts, thread_has_order,
     thread_messages, EmailFilter,
 };
 pub use update::{

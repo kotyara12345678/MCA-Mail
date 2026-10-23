@@ -180,6 +180,17 @@ pub async fn spam_verdict(
     }
 }
 
+/// The red flag of one message: true when the pipeline marked it as
+/// potential or running order traffic. A message nobody has run over is
+/// not an order (`false`).
+pub async fn order_flag(pool: &PgPool, id: EmailId) -> Result<bool, AppError> {
+    let flagged = sqlx::query_scalar::<_, bool>("SELECT order_flag FROM emails WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(flagged.unwrap_or(false))
+}
+
 /// Whether another message in the thread already carries the order context:
 /// the red flag itself, or a lead the pipeline attached.
 ///

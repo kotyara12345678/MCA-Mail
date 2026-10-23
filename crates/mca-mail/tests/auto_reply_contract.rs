@@ -1,10 +1,13 @@
 //! Stage G: the production auto-responder.
 //!
-//! Four claims have to hold together before this may touch a real customer:
+//! Five claims have to hold together before this may touch a real customer:
 //! a reply the pipeline produced actually leaves the building, review mode
 //! still holds the very same reply, a qualified lead produces one manager
-//! card to every configured address, and spam never reaches the outbox
-//! at all. The fifth is idempotency: one inbound email, one queued reply.
+//! card to every configured address, spam never reaches the outbox at all,
+//! and — the gate the whole dialogue hangs on — only order traffic is ever
+//! answered: a partner pitch, a promo or an analytics dump that still opens
+//! a lead gets no draft, no question and no send. The sixth is idempotency:
+//! one inbound email, one queued reply.
 
 use std::sync::Arc;
 
@@ -149,6 +152,16 @@ fn stub_pipeline(
     );
     llm.stub_json("lead qualification agent", qualification);
     llm.stub_json("customer manager at MCA Logistics", reply);
+}
+
+fn classification(category: &str, confidence: f32) -> serde_json::Value {
+    serde_json::json!({
+        "category": category,
+        "confidence": confidence,
+        "explanation": "auto-reply contract fixture",
+        "requires_human": false,
+        "suggested_action": "qualify"
+    })
 }
 
 /// The model extracted nothing: every quote-blocking field is still a gap,
@@ -515,6 +528,95 @@ async fn one_inbound_email_queues_exactly_one_reply() {
         outbox_for_email(&pool, id).await,
         1,
         "a replayed message must not queue a second reply"
+    );
+}
+
+/// The dialogue belongs to orders. A partner pitch that classification
+/// still turns into a lead (partners may open one) must produce no draft,
+/// no question and no outbox row — the red flag is the gate, and only
+/// order traffic earns it. The order that follows in the same test proves
+/// the very same pipeline still answers when the flag is up.
+#[tokio::test]
+async fn only_order_traffic_earns_an_automatic_reply() {
+    let _guard = SERIAL.lock().await;
+    let pool = setup_db().await;
+    let llm = Arc::new(MockLlmProvider::new(&mock_llm_settings()));
+    llm.stub_json("spam detection expert", &replies::not_spam());
+    llm.stub_json(
+        "classification agent for a logistics",
+        &classification("partner", 0.9),
+    );
+    llm.stub_json("lead qualification agent", &qualification_partial());
+    llm.stub_json("customer manager at MCA Logistics", &reply_asking());
+    let orch = build_orchestrator(
+        auto_config(),
+        pool.clone(),
+        Arc::clone(&llm) as Arc<dyn LlmProvider>,
+    );
+
+    let partner = format!("partner-{}@example.com", uuid::Uuid::new_v4());
+    let pitch = ingest(
+        &pool,
+        &email(
+            &partner,
+            &format!("Совместный вебинар {}", uuid::Uuid::new_v4()),
+            "Предлагаем провести совместный вебинар для ваших клиентов.",
+        ),
+    )
+    .await;
+    orch.process_email(pitch).await.expect("process pitch");
+
+    let pitch_lead = email_repo::get(&pool, pitch)
+        .await
+        .expect("get")
+        .lead_id
+        .expect("a partner email may still open a lead");
+    assert_eq!(
+        drafts_for(&pool, pitch_lead).await,
+        0,
+        "a non-order lead must receive no draft"
+    );
+    assert_eq!(
+        outbox_for_lead(&pool, pitch_lead).await,
+        Vec::<(String, String, String)>::new(),
+        "a non-order lead must receive nothing"
+    );
+
+    // The same pipeline, an order this time: the flag goes up and the
+    // reply the model prepared reaches the outbox.
+    llm.reset();
+    llm.stub_json("spam detection expert", &replies::not_spam());
+    llm.stub_json(
+        "classification agent for a logistics",
+        &classification("transport_request", 0.9),
+    );
+    llm.stub_json("lead qualification agent", &qualification_partial());
+    llm.stub_json("customer manager at MCA Logistics", &reply_asking());
+    let buyer = format!("buyer-{}@example.com", uuid::Uuid::new_v4());
+    let order = ingest(
+        &pool,
+        &email(
+            &buyer,
+            &format!("Доставка станков {}", uuid::Uuid::new_v4()),
+            "Нужно перевезти станки из Шэньчжэня в Москву",
+        ),
+    )
+    .await;
+    orch.process_email(order).await.expect("process order");
+
+    let order_lead = email_repo::get(&pool, order)
+        .await
+        .expect("get")
+        .lead_id
+        .expect("an order opens a lead");
+    assert_eq!(
+        outbox_for_lead(&pool, order_lead).await,
+        vec![(
+            "customer_reply".to_string(),
+            buyer.clone(),
+            "queued".to_string()
+        )],
+        "an order is answered"
     );
 }
 

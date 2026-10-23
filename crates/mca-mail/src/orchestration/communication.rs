@@ -1,5 +1,11 @@
 //! Phase 4: reply planning, conversation append and the exit conditions of
 //! the automatic dialogue.
+//!
+//! The dialogue belongs to order traffic. The red flag the classification
+//! phase raised on this very message is the gate: an order and every
+//! follow-up inside its thread keep the conversation going, everything else
+//! — a partner pitch, a promo, an analytics dump, a commercial offer someone
+//! sent us — is catalogued and left for a person to answer.
 
 use tracing::{info, warn};
 
@@ -12,7 +18,9 @@ use crate::domain::{
 };
 use crate::error::AppError;
 use crate::observability::Correlation;
-use crate::persistence::{draft_repo, lead_repo, outbox_repo, outbox_repo::OutboundKind, run_repo};
+use crate::persistence::{
+    draft_repo, email_repo, lead_repo, outbox_repo, outbox_repo::OutboundKind, run_repo,
+};
 
 use super::dialogue::{self, Dialogue};
 
@@ -27,6 +35,15 @@ impl Orchestrator {
         company_name: Option<String>,
     ) -> Result<(), AppError> {
         if !self.config.agents.communication {
+            return Ok(());
+        }
+        // Orders only. The flag is raised during classification — this
+        // message's own verdict, thread context included — so a follow-up
+        // in an order thread is flagged too and the dialogue continues
+        // there, while first contact that never looked like an order gets
+        // no automatic question, no draft and no send.
+        if !email_repo::order_flag(&self.pool, *email_id).await? {
+            info!(email_id = %email_id, "not order traffic; automatic reply skipped");
             return Ok(());
         }
         run_repo::record_stage(&self.pool, *run_id, ProcessingStage::ReplyPlanning, false).await?;
