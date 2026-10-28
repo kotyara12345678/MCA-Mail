@@ -52,6 +52,12 @@ Categories:
 - other: Fits no business shape at all (auto-replies, personal mail, nonsense)
 - uncertain: Not enough information to classify
 
+Pick the most specific service category (transport_request, full_import_request,
+customs_request, procurement_request) whenever the message names cargo, a route,
+weight or a delivery date; use new_lead only for a commercial approach that
+names no concrete order. Report the confidence you actually have — an unsure
+guess belongs below 0.75.
+
 Respond with: {"category": "...", "confidence": 0.0-1.0, "explanation": "...", "requires_human": false, "suggested_action": "..."}"#;
 
         let user = format!(

@@ -37,13 +37,29 @@ impl Orchestrator {
         if !self.config.agents.communication {
             return Ok(());
         }
-        // Orders only. The flag is raised during classification — this
-        // message's own verdict, thread context included — so a follow-up
-        // in an order thread is flagged too and the dialogue continues
-        // there, while first contact that never looked like an order gets
-        // no automatic question, no draft and no send.
-        if !email_repo::order_flag(&self.pool, *email_id).await? {
+        // Orders only. The red flag raised during classification is the first
+        // gate: a message nobody flagged gets no automatic question, no draft
+        // and no send. The flag alone is not enough — it also covers general
+        // demand — so first contact must additionally be a transport order in
+        // its own right. A follow-up inside a thread that already carries an
+        // order keeps the dialogue going, whatever the model called it.
+        let email = email_repo::get(&self.pool, *email_id).await?;
+        if !email.order_flag {
             info!(email_id = %email_id, "not order traffic; automatic reply skipped");
+            return Ok(());
+        }
+        let in_order_thread =
+            email_repo::thread_has_order(&self.pool, email.thread_id, *email_id).await?;
+        let first_contact_order = email
+            .category
+            .as_ref()
+            .is_some_and(|category| category.is_transport_order());
+        if !in_order_thread && !first_contact_order {
+            info!(
+                email_id = %email_id,
+                category = ?email.category,
+                "not a transport order; automatic reply skipped"
+            );
             return Ok(());
         }
         run_repo::record_stage(&self.pool, *run_id, ProcessingStage::ReplyPlanning, false).await?;

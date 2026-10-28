@@ -96,9 +96,12 @@ pub mod replies {
         })
     }
 
+    /// First contact that is an order: these fixtures drive the dialogue
+    /// tests, so the category has to be the one the reply gate accepts — a
+    /// transport order, not a general enquiry.
     pub fn classification_lead() -> serde_json::Value {
         json!({
-            "category": "new_lead",
+            "category": "full_import_request",
             "confidence": 0.9,
             "explanation": "New commercial enquiry",
             "requires_human": false,

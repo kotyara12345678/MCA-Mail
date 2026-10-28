@@ -58,7 +58,21 @@ impl EmailCategory {
     }
 
     /// Whether a lead may be created for this category at all.
-    ///
+    ///        /// Categories that are, on their own, an actual order for transport
+    /// services — freight, a full import, customs clearance, procurement
+    /// abroad. These and only these earn an automatic reply on first
+    /// contact; a general enquiry (`new_lead`, `business_inquiry`) is a
+    /// conversation for a person, not for the reply agent.
+    pub const fn is_transport_order(&self) -> bool {
+        matches!(
+            self,
+            EmailCategory::TransportRequest
+                | EmailCategory::FullImportRequest
+                | EmailCategory::CustomsRequest
+                | EmailCategory::ProcurementRequest
+        )
+    }
+
     /// A lead is a commercial record; creating one for spam, internal traffic,
     /// an unrecognised message or an unclassified one would pollute the
     /// pipeline the manager reads.
